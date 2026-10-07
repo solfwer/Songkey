@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'cancionero_data.dart';
 import 'models.dart';
 import 'seed.dart';
 
@@ -24,12 +23,6 @@ class Store extends ChangeNotifier {
     if (raw != null) {
       try {
         state = AppState.decode(raw);
-        // Fusionar canciones del cancionero que falten (usuarios con datos guardados)
-        final known = state.songs.map((s) => s.id).toSet();
-        final missing = cancioneroSongs().where((s) => !known.contains(s.id)).toList();
-        if (missing.isNotEmpty) {
-          state = AppState(groups: state.groups, songs: [...state.songs, ...missing], setlists: state.setlists);
-        }
       } catch (_) {}
     }
     isDark = prefs.getBool('songkey-dark') ?? true;
