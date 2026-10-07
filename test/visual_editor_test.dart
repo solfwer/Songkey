@@ -1,0 +1,58 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:appchords/songs.dart';
+import 'package:appchords/widgets/visual_chord_editor.dart';
+
+void main() {
+  group('round-trip ChordPro <-> posiciones', () {
+    test('convierte y reconstruye acordes inline', () {
+      const body = 'Verso 1\n[Am]Hola [F]mundo\n[C]Otra [G]línea';
+      final parsed = chordProToPositioned(body);
+
+      expect(parsed.lyricLines[0], 'Verso 1');
+      expect(parsed.lyricLines[1], 'Hola mundo');
+      expect(parsed.lyricLines[2], 'Otra línea');
+
+      final am = parsed.chords.firstWhere((c) => c.chord == 'Am');
+      expect(am.lineIndex, 1);
+      expect(am.charIndex, 0);
+      final f = parsed.chords.firstWhere((c) => c.chord == 'F');
+      expect(f.charIndex, 5); // tras "Hola "
+
+      final rebuilt = positionedToChordPro(parsed.lyricLines, parsed.chords);
+      expect(rebuilt, body);
+    });
+
+    test('transpone acordes posicionados', () {
+      final parsed = chordProToPositioned('[C]Hola [G]mundo');
+      final up = transposePositioned(parsed.chords, 2);
+      expect(up.map((c) => c.chord).toList(), ['D', 'A']);
+    });
+  });
+
+  group('diatonicChords', () {
+    test('Do mayor', () {
+      final chords = diatonicChords('C');
+      expect(chords.map((c) => c.symbol).toList(), ['C', 'Dm', 'Em', 'F', 'G', 'Am', 'Bdim']);
+    });
+
+    test('La menor', () {
+      final chords = diatonicChords('Am');
+      expect(chords.map((c) => c.symbol).toList(), ['Am', 'Bdim', 'C', 'Dm', 'Em', 'F', 'G']);
+    });
+  });
+
+  testWidgets('VisualChordEditor renderiza y responde a llamadas', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: VisualChordEditor(
+          initialBody: 'Verso 1\n[Am]Hola mundo',
+          songKey: 'C',
+          onChanged: (_) {},
+        ),
+      ),
+    ));
+    expect(find.text('Editor visual de acordes'), findsOneWidget);
+    expect(find.byType(VisualChordEditor), findsOneWidget);
+  });
+}

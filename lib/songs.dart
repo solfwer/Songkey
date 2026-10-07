@@ -173,6 +173,161 @@ String transposeChord(String chord, int st) {
   return chord.replaceAllMapped(RegExp(r'([A-G][#b]?)'), (m) => _shiftNote(m.group(1)!, st));
 }
 
+// ============================================================
+// NUEVO: Modelo de acordes posicionados (para editor visual)
+// ============================================================
+
+/// Un acorde anclado a una posición absoluta en el texto plano de la canción.
+/// `lineIndex` = índice de línea en el array de líneas de la canción (sin encabezados).
+/// `charIndex` = índice de carácter en esa línea (0 = antes del primer carácter).
+/// `chord` = símbolo del acorde, ej. "Am", "F#m7", "G/B".
+class PositionedChord {
+  final int lineIndex;
+  final int charIndex;
+  final String chord;
+  PositionedChord({required this.lineIndex, required this.charIndex, required this.chord});
+
+  PositionedChord copyWith({int? lineIndex, int? charIndex, String? chord}) =>
+      PositionedChord(lineIndex: lineIndex ?? this.lineIndex, charIndex: charIndex ?? this.charIndex, chord: chord ?? this.chord);
+
+  Map<String, dynamic> toJson() => {'line': lineIndex, 'char': charIndex, 'chord': chord};
+  factory PositionedChord.fromJson(Map<String, dynamic> j) => PositionedChord(lineIndex: j['line'] as int, charIndex: j['char'] as int, chord: j['chord'] as String);
+
+  @override
+  bool operator ==(Object other) => other is PositionedChord && other.lineIndex == lineIndex && other.charIndex == charIndex && other.chord == chord;
+  @override
+  int get hashCode => Object.hash(lineIndex, charIndex, chord);
+  @override
+  String toString() => 'PositionedChord(line:$lineIndex, char:$charIndex, $chord)';
+}
+
+/// Convierte el cuerpo ChordPro (con `[Ac]letra`) a:
+/// - `lyricLines`: solo la letra, una String por línea (sin acordes).
+/// - `chords`: lista de PositionedChord con posiciones absolutas.
+({List<String> lyricLines, List<PositionedChord> chords}) chordProToPositioned(String body) {
+  final rawLines = body.replaceAll('\r', '').split('\n');
+  final lyricLines = <String>[];
+  final chords = <PositionedChord>[];
+  int lyricLineIdx = -1;
+
+  for (final raw in rawLines) {
+    final h = _header.firstMatch(raw);
+    if (h != null) {
+      // Encabezado de sección -> lo guardamos como línea especial con prefijo
+      lyricLines.add(raw.trim());
+      lyricLineIdx++;
+      continue;
+    }
+    if (raw.trim().isEmpty) {
+      lyricLines.add('');
+      lyricLineIdx++;
+      continue;
+    }
+    // Línea de acordes sola (formato antiguo: línea de acordes sobre línea de letra)
+    // La detectamos porque TODOS los tokens son acordes (sin '[')
+    if (isChordLine(raw) && !raw.contains('[')) {
+      // Esta línea se funde con la siguiente en parseSong, aquí la ignoramos porque
+      // la información de acordes ya está en la línea de letra siguiente (parseInline).
+      // Pero por si acaso, la saltamos.
+      continue;
+    }
+    // Línea normal (puede tener acordes inline [Am]letra)
+    lyricLineIdx++;
+    final inline = parseInline(raw);
+    final buffer = StringBuffer();
+    int charPos = 0;
+    for (final seg in inline) {
+      if (seg.chord != null) {
+        chords.add(PositionedChord(lineIndex: lyricLineIdx, charIndex: charPos, chord: seg.chord!));
+      }
+      buffer.write(seg.text);
+      charPos += seg.text.length;
+    }
+    lyricLines.add(buffer.toString());
+  }
+  return (lyricLines: lyricLines, chords: chords);
+}
+
+/// Reconstruye cuerpo ChordPro a partir de líneas de letra + acordes posicionados.
+String positionedToChordPro(List<String> lyricLines, List<PositionedChord> chords) {
+  final chordsByLine = <int, List<PositionedChord>>{};
+  for (final c in chords) {
+    chordsByLine.putIfAbsent(c.lineIndex, () => []).add(c);
+  }
+  for (final list in chordsByLine.values) {
+    list.sort((a, b) => a.charIndex.compareTo(b.charIndex));
+  }
+  final out = <String>[];
+  for (var i = 0; i < lyricLines.length; i++) {
+    final line = lyricLines[i];
+    final chs = chordsByLine[i] ?? [];
+    if (chs.isEmpty) {
+      out.add(line);
+      continue;
+    }
+    // Reinsertar acordes en orden inverso para no desplazar índices
+    var modified = line;
+    for (var j = chs.length - 1; j >= 0; j--) {
+      final c = chs[j];
+      final idx = c.charIndex.clamp(0, modified.length);
+      modified = '${modified.substring(0, idx)}[${c.chord}]${modified.substring(idx)}';
+    }
+    out.add(modified);
+  }
+  return out.join('\n');
+}
+
+/// Transpone todos los acordes posicionados.
+List<PositionedChord> transposePositioned(List<PositionedChord> chords, int semitones) {
+  if (semitones == 0) return chords;
+  return chords.map((c) => c.copyWith(chord: transposeChord(c.chord, semitones))).toList();
+}
+
+/// Acordes diatónicos para una tonalidad dada.
+/// Devuelve lista de (grado, símbolo, nombre) para mayor/menor.
+List<({String degree, String symbol, String name})> diatonicChords(String key) {
+  final isMinor = key.endsWith('m') || key.endsWith('min');
+  final root = isMinor ? key.substring(0, key.length - (key.endsWith('min') ? 3 : 1)) : key;
+  final rootIdx = _sharps.indexOf(_flats[root] ?? root);
+  if (rootIdx < 0) return [];
+
+  // Intervalos desde la tónica para cada grado (en semitonos)
+  final majorIntervals = [0, 2, 4, 5, 7, 9, 11]; // I, ii, iii, IV, V, vi, vii°
+  final minorIntervals = [0, 2, 3, 5, 7, 8, 10]; // i, ii°, III, iv, v, VI, VII
+  final majorQualities = ['', 'm', 'm', '', '', 'm', 'dim'];
+  final minorQualities = ['m', 'dim', '', 'm', 'm', '', ''];
+  final degrees = ['I', 'ii', 'iii', 'IV', 'V', 'vi', 'vii°'];
+  final degreesMinor = ['i', 'ii°', 'III', 'iv', 'v', 'VI', 'VII'];
+
+  final intervals = isMinor ? minorIntervals : majorIntervals;
+  final qualities = isMinor ? minorQualities : majorQualities;
+  final degLabels = isMinor ? degreesMinor : degrees;
+
+  return List.generate(7, (i) {
+    final noteIdx = (rootIdx + intervals[i]) % 12;
+    final note = _sharps[noteIdx];
+    final qual = qualities[i];
+    return (degree: degLabels[i], symbol: '$note$qual', name: '$note$qual');
+  });
+}
+
+/// Extensiones comunes para añadir al panel (V7, sus4, add9, etc.)
+List<String> commonExtensions(String baseChord) {
+  final rootMatch = RegExp(r'^([A-G][#b]?)').firstMatch(baseChord);
+  if (rootMatch == null) return [];
+  final root = rootMatch.group(1)!;
+  final isMinor = baseChord.contains('m') && !baseChord.contains('M');
+  final ext = <String>[];
+  // Séptimas
+  ext.add(isMinor ? '${root}m7' : '${root}7');
+  ext.add(isMinor ? '${root}m6' : '${root}6');
+  ext.add('${root}sus4');
+  ext.add('${root}sus2');
+  ext.add('${root}add9');
+  if (!isMinor) ext.add('${root}maj7');
+  return ext;
+}
+
 
 
 
