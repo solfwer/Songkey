@@ -1,0 +1,26 @@
+name: appchords
+description: Biblioteca de canciones con acordes, setlists y grupos.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  shared_preferences: ^2.3.2
+  syncfusion_flutter_pdf: ^26.1.35
+  file_picker: ^10.3.8
+  share_plus: ^10.1.4
+  path_provider: ^2.1.4
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+
