@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../data/chord_parser.dart';
-import '../theme.dart';
+import '../../../data/chord_parser.dart';
+import '../../../theme.dart';
 
 /// Widget para editar acordes visualmente sobre la letra.
 /// - Tap en una línea → muestra picker de acordes en esa posición.

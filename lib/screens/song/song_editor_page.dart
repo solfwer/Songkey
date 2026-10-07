@@ -6,8 +6,8 @@ import '../../data/chord_parser.dart';
 import '../../data/store.dart';
 import '../../models/app_state.dart';
 import '../../models/song.dart';
-import '../../widgets/visual_chord_editor.dart';
 import 'widgets/pdf_import_button.dart';
+import 'widgets/visual_chord_editor.dart';
 
 class SongEditorPage extends StatefulWidget {
   final Store store;

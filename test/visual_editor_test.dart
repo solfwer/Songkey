@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:appchords/data/chord_parser.dart';
 import 'package:appchords/screens/song/song_editor_page.dart';
 import 'package:appchords/data/store.dart';
-import 'package:appchords/widgets/visual_chord_editor.dart';
+import 'package:appchords/screens/song/widgets/visual_chord_editor.dart';
 
 void main() {
   group('round-trip ChordPro <-> posiciones', () {
