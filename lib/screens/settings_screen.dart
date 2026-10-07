@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../exporters.dart';
+import '../legal.dart';
 import '../seed.dart';
 import '../store.dart';
+import '../theme.dart';
 import 'home_splash.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -66,8 +69,85 @@ class SettingsScreen extends StatelessWidget {
           },
         ),
         const Divider(),
-        const AboutListTile(icon: Icon(Icons.info_outline), applicationName: 'Songkey', applicationVersion: '1.0.0', applicationLegalese: 'App de acordes, letras y setlists'),
+        const ListTile(title: Text('Legal', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+        ListTile(
+          leading: const Icon(Icons.gavel, color: AppColors.warm),
+          title: const Text('Aviso legal'),
+          subtitle: const Text('Derechos sobre las letras y los acordes'),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LegalScreen(topic: LegalTopic.aviso))),
+        ),
+        ListTile(
+          leading: const Icon(Icons.privacy_tip_outlined, color: AppColors.accent),
+          title: const Text('Política de privacidad'),
+          subtitle: const Text('Tus datos se quedan en tu dispositivo'),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LegalScreen(topic: LegalTopic.privacidad))),
+        ),
+        const _AboutSection(),
       ]),
     );
+  }
+}
+
+/// Carga la versión real (pubspec) y muestra las secciones de licencias y
+/// "Acerca de" con datos correctos en lugar de valores fijos.
+class _AboutSection extends StatefulWidget {
+  const _AboutSection();
+
+  @override
+  State<_AboutSection> createState() => _AboutSectionState();
+}
+
+class _AboutSectionState extends State<_AboutSection> {
+  String _version = '1.0.0';
+  String _build = '1';
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(() {
+          _version = info.version;
+          _build = info.buildNumber;
+        });
+      }
+    } catch (_) {
+      // En entornos de prueba la versión puede no estar disponible; se usa el valor por defecto.
+    }
+  }
+
+  String get _versionLabel => '$_version ($_build)';
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(children: [
+      ListTile(
+        leading: const Icon(Icons.menu_book_outlined, color: AppColors.bridge),
+        title: const Text('Licencias de código abierto'),
+        subtitle: const Text('Componentes que usa la app'),
+        onTap: () => showLicensePage(
+          context: context,
+          applicationName: 'Songkey',
+          applicationVersion: _versionLabel,
+        ),
+      ),
+      ListTile(
+        leading: const Icon(Icons.info_outline),
+        title: const Text('Acerca de'),
+        subtitle: Text('Versión $_versionLabel'),
+        onTap: () => showAboutDialog(
+          context: context,
+          applicationName: 'Songkey',
+          applicationVersion: 'Versión $_versionLabel',
+          applicationLegalese: '© 2026 Songkey\nLas letras y los acordes pertenecen a sus autores.',
+          children: const [SizedBox(height: 8)],
+        ),
+      ),
+    ]);
   }
 }
