@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../models.dart';
-import '../store.dart';
-import '../theme.dart';
+import '../../data/store.dart';
+import '../../models/app_state.dart';
+import '../../models/setlist.dart';
+import '../../models/song.dart';
+import '../../theme.dart';
 
 const _roles = ['Vocalista', 'Coros', 'Guitarra', 'Bajo', 'Batería', 'Teclados', 'Violín', 'Trompeta', 'Producción'];
 
@@ -153,10 +155,3 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     );
   }
 }
-
-
-
-
-
-
-

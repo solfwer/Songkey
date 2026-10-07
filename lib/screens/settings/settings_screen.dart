@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
-import '../exporters.dart';
-import '../legal.dart';
-import '../seed.dart';
-import '../store.dart';
-import '../theme.dart';
-import 'home_splash.dart';
+import '../../data/seed.dart';
+import '../../data/store.dart';
+import '../../services/setlist_export.dart';
+import '../../theme.dart';
+import '../home/home_splash.dart';
+import 'legal_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   final Store store;

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../theme.dart';
-import '../main.dart' show HomeShell;
-import '../store.dart';
-import 'login_screen.dart';
+import '../../app.dart' show HomeShell;
+import '../../data/store.dart';
+import '../../theme.dart';
+import '../auth/login_screen.dart';
 
 class HomeSplash extends StatelessWidget {
   final Store store;
@@ -38,4 +38,3 @@ class HomeSplash extends StatelessWidget {
     );
   }
 }
-

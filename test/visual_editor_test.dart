@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:appchords/screens/song_screen.dart';
-import 'package:appchords/songs.dart';
-import 'package:appchords/store.dart';
+import 'package:appchords/data/chord_parser.dart';
+import 'package:appchords/screens/song/song_editor_page.dart';
+import 'package:appchords/data/store.dart';
 import 'package:appchords/widgets/visual_chord_editor.dart';
 
 void main() {

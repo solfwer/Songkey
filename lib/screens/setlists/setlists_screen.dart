@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../exporters.dart';
-import '../models.dart';
-import '../store.dart';
+import '../../data/store.dart';
+import '../../models/app_state.dart';
+import '../../models/setlist.dart';
+import '../../services/setlist_export.dart';
+import '../song/song_screen.dart';
 import 'setlist_songs_screen.dart';
-import 'song_screen.dart';
 
 class SetlistsScreen extends StatefulWidget {
   final Store store;
@@ -38,13 +39,13 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
           const SizedBox(height: 12),
           Expanded(
             child: s.setlists.isEmpty
-                ? const Center(child: Text('AÃºn no hay setlists.'))
+                ? const Center(child: Text('Aún no hay setlists.'))
                 : ListView(children: [
                     for (final l in s.setlists)
                       Card(
                         child: ListTile(
                           title: Text(l.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text('${l.date} Â· ${l.songIds.length} temas Â· ${l.members.length} invitados'),
+                          subtitle: Text('${l.date} · ${l.songIds.length} temas · ${l.members.length} invitados'),
                           trailing: Wrap(spacing: 0, crossAxisAlignment: WrapCrossAlignment.center, children: [
                             IconButton(icon: const Icon(Icons.picture_as_pdf), tooltip: 'Exportar PDF', onPressed: () => shareSetlistPdf(context, l, s.songs)),
                             IconButton(icon: const Icon(Icons.edit), onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SetlistDetailScreen(store: widget.store, setlistId: l.id)))),
@@ -148,7 +149,7 @@ class _Editor extends StatelessWidget {
           }),
         const SizedBox(height: 8),
         DropdownButton<String>(
-          hint: const Text('+ AÃ±adir canciÃ³nâ€¦'),
+          hint: const Text('+ Añadir canción…'),
           value: null,
           items: s.songs.where((x) => !list.songIds.contains(x.id)).map((x) => DropdownMenuItem(value: x.id, child: Text('${x.title} (${x.key})'))).toList(),
           onChanged: (v) { if (v != null) update((l) => Setlist(id: l.id, name: l.name, date: l.date, groupId: l.groupId, songIds: [...l.songIds, v], members: l.members)); },
@@ -158,7 +159,7 @@ class _Editor extends StatelessWidget {
         for (final m in list.members)
           ListTile(
             leading: CircleAvatar(child: Text(m.name.isEmpty ? '?' : m.name.substring(0, 1).toUpperCase())),
-            title: Text('${m.name} Â· ${m.role}'),
+            title: Text('${m.name} · ${m.role}'),
             trailing: Wrap(spacing: 0, children: [
               TextButton(onPressed: () => update((l) => Setlist(id: l.id, name: l.name, date: l.date, groupId: l.groupId, songIds: l.songIds, members: l.members.map((x) => x.id == m.id ? Member(id: x.id, name: x.name, role: x.role, status: x.status == 'confirmado' ? 'pendiente' : 'confirmado') : x).toList())), child: Text(m.status, style: TextStyle(color: m.status == 'confirmado' ? Colors.green : Colors.orange))),
               IconButton(icon: const Icon(Icons.close), onPressed: () => update((l) => Setlist(id: l.id, name: l.name, date: l.date, groupId: l.groupId, songIds: l.songIds, members: l.members.where((x) => x.id != m.id).toList()))),
@@ -168,7 +169,7 @@ class _Editor extends StatelessWidget {
           Expanded(child: TextField(controller: mName, decoration: const InputDecoration(hintText: 'Nombre'), onSubmitted: (_) => invite())),
         ]),
         Row(children: [
-          Expanded(child: TextField(controller: mRole, decoration: const InputDecoration(hintText: 'Rol (voz, guitarraâ€¦)'), onSubmitted: (_) => invite())),
+          Expanded(child: TextField(controller: mRole, decoration: const InputDecoration(hintText: 'Rol (voz, guitarra…)'), onSubmitted: (_) => invite())),
           IconButton(icon: const Icon(Icons.add), onPressed: invite),
         ]),
       ]),
@@ -187,12 +188,11 @@ class _Editor extends StatelessWidget {
 
   void invite() {
     if (mName.text.trim().isEmpty) return;
-    update((l) => Setlist(id: l.id, name: l.name, date: l.date, groupId: l.groupId, songIds: l.songIds, members: [...l.members, Member(id: uid(), name: mName.text.trim(), role: mRole.text.trim().isEmpty ? 'mÃºsico' : mRole.text.trim())]));
+    update((l) => Setlist(id: l.id, name: l.name, date: l.date, groupId: l.groupId, songIds: l.songIds, members: [...l.members, Member(id: uid(), name: mName.text.trim(), role: mRole.text.trim().isEmpty ? 'músico' : mRole.text.trim())]));
     mName.clear();
     mRole.clear();
   }
 }
-
 
 class SetlistDetailScreen extends StatefulWidget {
   final Store store;
@@ -228,4 +228,3 @@ class _SetlistDetailScreenState extends State<SetlistDetailScreen> {
     );
   }
 }
-

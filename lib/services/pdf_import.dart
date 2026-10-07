@@ -481,6 +481,13 @@ String _mergeChords(_Line lyric, List<({double x, String chord})> chords) {
   }
 }
 
+/// Convierte un PDF de cancionero en un borrador (título + cuerpo ChordPro),
+/// usando el nombre del archivo como título provisional.
+Future<({String title, String body})> pdfToDraft(String fileName, Uint8List bytes) async {
+  final base = fileName.replaceAll(RegExp(r'\.pdf$', caseSensitive: false), '').trim();
+  return pdfToDraftFromBytes(bytes, fallbackTitle: base);
+}
+
 /// Detecta la tonalidad a partir del cuerpo (primer acorde de la primera línea
 /// solo de acordes), ej. "C#m", "G", "Dm".
 String keyFromBody(String body) {

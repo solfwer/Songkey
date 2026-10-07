@@ -1,6 +1,10 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'setlist.dart';
+import 'song.dart';
+
+/// Genera un id corto aleatorio para entidades (canciones, grupos, setlists...).
 String uid() {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
   final r = Random.secure();
@@ -25,56 +29,7 @@ class Group {
       Group(id: j['id'], name: j['name'], color: groupColorFromString(j['color']), members: (j['members'] as List? ?? []).map((m) => Member.fromJson(Map<String, dynamic>.from(m))).toList(), owner: j['owner']);
 }
 
-class Song {
-  String id;
-  String title;
-  String? author;
-  String key;
-  int? bpm;
-  String? groupId;
-  String body;
-  Song({required this.id, required this.title, this.author, this.key = 'C', this.bpm, this.groupId, this.body = ''});
-  Map<String, dynamic> toJson() => {
-        'id': id, 'title': title, 'author': author, 'key': key, 'bpm': bpm, 'groupId': groupId, 'body': body,
-      };
-  factory Song.fromJson(Map<String, dynamic> j) => Song(
-        id: j['id'], title: j['title'] ?? '', author: j['author'], key: j['key'] ?? 'C',
-        bpm: j['bpm'], groupId: j['groupId'], body: j['body'] ?? '',
-      );
-}
-
-class Member {
-  String id;
-  String name;
-  String role;
-  String status; // 'pendiente' | 'confirmado'
-  Member({required this.id, required this.name, this.role = 'músico', this.status = 'pendiente'});
-  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'role': role, 'status': status};
-  factory Member.fromJson(Map<String, dynamic> j) =>
-      Member(id: j['id'], name: j['name'] ?? '', role: j['role'] ?? '', status: j['status'] ?? 'pendiente');
-}
-
-class Setlist {
-  String id;
-  String name;
-  String date;
-  String? groupId;
-  List<String> songIds;
-  List<Member> members;
-  Setlist({required this.id, required this.name, required this.date, this.groupId, List<String>? songIds, List<Member>? members})
-      : songIds = songIds ?? [],
-        members = members ?? [];
-  Map<String, dynamic> toJson() => {
-        'id': id, 'name': name, 'date': date, 'groupId': groupId,
-        'songIds': songIds, 'members': members.map((m) => m.toJson()).toList(),
-      };
-  factory Setlist.fromJson(Map<String, dynamic> j) => Setlist(
-        id: j['id'], name: j['name'] ?? '', date: j['date'] ?? '', groupId: j['groupId'],
-        songIds: List<String>.from(j['songIds'] ?? []),
-        members: (j['members'] as List? ?? []).map((m) => Member.fromJson(Map<String, dynamic>.from(m))).toList(),
-      );
-}
-
+/// Estado global de la app: grupos, canciones y setlists.
 class AppState {
   List<Group> groups;
   List<Song> songs;
@@ -93,4 +48,3 @@ class AppState {
       );
   factory AppState.decode(String raw) => AppState.fromJson(jsonDecode(raw));
 }
-

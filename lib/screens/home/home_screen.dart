@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../store.dart';
-import '../theme.dart';
+import '../../data/store.dart';
+import '../../theme.dart';
 import 'library_screen.dart';
 
 class HomeScreen extends StatelessWidget {

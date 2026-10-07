@@ -4,11 +4,9 @@
 // por un correo real que uses para consultas y solicitudes de retiro de
 // contenido, y revisa los textos con quien necesites (los textos son una
 // base razonable, no asesoría legal).
-library;
-
 import 'package:flutter/material.dart';
 
-import 'theme.dart';
+import '../../theme.dart';
 
 /// Correo de contacto para asuntos legales (aviso de retiro de contenido,
 /// preguntas de privacidad). CAMBIA ESTE VALOR.

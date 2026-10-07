@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../store.dart';
-import '../theme.dart';
-import '../main.dart' show HomeShell;
+import '../../app.dart' show HomeShell;
+import '../../data/store.dart';
+import '../../theme.dart';
 
 class LoginScreen extends StatefulWidget {
   final Store store;

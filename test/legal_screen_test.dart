@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:appchords/legal.dart';
-import 'package:appchords/screens/settings_screen.dart';
-import 'package:appchords/store.dart';
+import 'package:appchords/screens/settings/legal_screen.dart';
+import 'package:appchords/screens/settings/settings_screen.dart';
+import 'package:appchords/data/store.dart';
 import 'package:appchords/theme.dart';
 
 void main() {

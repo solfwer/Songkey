@@ -1,0 +1,261 @@
+// Panel lateral (drawer) de opciones de vista de la canción: acordes/letra,
+// tono, tamaño de fuente, modo página vs ajustar-todo, compartir/exportar y
+// acciones de edición/eliminación. Mutan [config] y avisan con [onChanged].
+import 'package:flutter/material.dart';
+
+import '../../../data/chord_parser.dart';
+import '../../../models/song.dart';
+import '../../../services/song_export.dart';
+import '../../../theme.dart';
+
+/// Estado ajustable de la vista de canción (vive en el estado de la pantalla
+/// para que los accesos directos por teclado/pedal lo lean igual que el panel).
+class SongViewConfig {
+  int semitones = 0;
+  double fontSize;
+  bool lyricsOnly = false;
+  bool fitToScreen = false;
+  int fitPage = 0;
+  double fitMinFont = 14;
+  SongViewConfig({required this.fontSize});
+}
+
+class ViewOptionsPanel extends StatelessWidget {
+  final Song song;
+
+  /// Contexto de la pantalla (no del drawer): sigue montado tras cerrar el
+  /// panel y se usa para compartir/exportar y para navegar al editor.
+  final BuildContext hostContext;
+  final SongViewConfig config;
+  final VoidCallback onChanged;
+  final FocusNode focusNode;
+  final Future<void> Function() onEdit;
+  final VoidCallback onDelete;
+
+  const ViewOptionsPanel({
+    super.key,
+    required this.song,
+    required this.hostContext,
+    required this.config,
+    required this.onChanged,
+    required this.focusNode,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  Widget _panelLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+      child: Row(children: [
+        Container(width: 10, height: 10, decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(3))),
+        const SizedBox(width: 8),
+        Expanded(child: Text(text.toUpperCase(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(letterSpacing: 1.5, color: Colors.grey, fontSize: 11, fontWeight: FontWeight.bold))),
+      ]),
+    );
+  }
+
+  Widget _panelCard(List<Widget> children) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      child: Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Column(children: children)),
+    );
+  }
+
+  Widget _choiceChip(BuildContext context, String label, IconData icon, bool selected, VoidCallback onTap) {
+    final scheme = Theme.of(context).colorScheme;
+    return Expanded(
+      child: ChoiceChip(
+        avatar: Icon(icon, size: 16, color: selected ? scheme.onPrimary : scheme.onSurfaceVariant),
+        label: Text(label, style: TextStyle(fontSize: 12.5, color: selected ? scheme.onPrimary : scheme.onSurface)),
+        selected: selected,
+        selectedColor: AppColors.primary,
+        showCheckmark: false,
+        onSelected: (_) => onTap(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final width = (MediaQuery.of(hostContext).size.width * 0.95).clamp(0.0, 340.0).toDouble();
+    return Drawer(
+      width: width,
+      child: SafeArea(
+        child: ListView(padding: EdgeInsets.zero, children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(20, 22, 20, 18),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [AppColors.primary.withValues(alpha: 0.95), AppColors.card]),
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(18)),
+            ),
+            child: Row(children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12)),
+                child: const Icon(Icons.tune, size: 26),
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Opciones de pantalla', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
+                const SizedBox(height: 2),
+                Text(song.title, style: const TextStyle(color: Colors.white70, fontSize: 12.5), overflow: TextOverflow.ellipsis),
+              ])),
+            ]),
+          ),
+          _panelLabel('Visual'),
+          _panelCard([
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+              child: Row(children: [
+                _choiceChip(context, 'Acordes', Icons.music_note, !config.lyricsOnly, () {
+                  config.lyricsOnly = false;
+                  onChanged();
+                }),
+                const SizedBox(width: 8),
+                _choiceChip(context, 'Solo letra', Icons.subject, config.lyricsOnly, () {
+                  config.lyricsOnly = true;
+                  onChanged();
+                }),
+              ]),
+            ),
+          ]),
+          _panelLabel('Tono y tamaño'),
+          _panelCard([
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: Column(children: [
+                Row(children: [
+                  const Icon(Icons.library_music, size: 20),
+                  const SizedBox(width: 8),
+                  const Expanded(child: Text('Tono')),
+                  Text(transposeChord(song.key, config.semitones), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.accent)),
+                  IconButton(icon: const Icon(Icons.restart_alt, size: 18), tooltip: 'Tono original', onPressed: () {
+                    config.semitones = 0;
+                    onChanged();
+                  }),
+                ]),
+                Row(children: [
+                  Expanded(child: IconButton.filledTonal(icon: const Icon(Icons.remove), tooltip: 'Bajar tono', onPressed: () {
+                    if (config.semitones > -12) config.semitones--;
+                    onChanged();
+                  })),
+                  const SizedBox(width: 8),
+                  Expanded(child: IconButton.filledTonal(icon: const Icon(Icons.add), tooltip: 'Subir tono', onPressed: () {
+                    if (config.semitones < 12) config.semitones++;
+                    onChanged();
+                  })),
+                ]),
+              ]),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+              child: Column(children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 2,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    const Icon(Icons.format_size, size: 20),
+                    const Text('Tamaño de fuente'),
+                    Text('${config.fontSize.round()}px', style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.accent)),
+                  ],
+                ),
+                Slider(value: config.fontSize, min: 12, max: 34, divisions: 22, label: config.fontSize.round().toString(), onChanged: (v) {
+                  config.fontSize = v;
+                  onChanged();
+                }),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Vista previa: AaGg', style: TextStyle(fontSize: config.fontSize.clamp(14.0, 24.0), color: AppColors.primary, fontWeight: FontWeight.bold)),
+                ),
+              ]),
+            ),
+          ]),
+          _panelLabel('Pantalla'),
+          _panelCard([
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+              child: Row(children: [
+                _choiceChip(context, 'Página', Icons.swipe, !config.fitToScreen, () {
+                  config.fitToScreen = false;
+                  config.fitPage = 0;
+                  onChanged();
+                }),
+                const SizedBox(width: 8),
+                _choiceChip(context, 'Ajustar todo', Icons.fit_screen, config.fitToScreen, () {
+                  config.fitToScreen = true;
+                  config.fitPage = 0;
+                  onChanged();
+                  WidgetsBinding.instance.addPostFrameCallback((_) => focusNode.requestFocus());
+                }),
+              ]),
+            ),
+            if (config.fitToScreen)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: Column(children: [
+                  Row(children: [
+                    const Icon(Icons.text_fields),
+                    const SizedBox(width: 8),
+                    const Expanded(child: Text('Mínimo legible')),
+                    Text('${config.fitMinFont.round()}px', style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.accent)),
+                  ]),
+                  Slider(value: config.fitMinFont, min: 10, max: 18, divisions: 8, label: config.fitMinFont.round().toString(), onChanged: (v) {
+                    config.fitMinFont = v;
+                    onChanged();
+                  }),
+                  const Text('Calcula el tamaño para que quepa toda la canción. Navega tocando los lados, con flechas o pedal.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                ]),
+              )
+            else
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: Text('Página: desplázate con el dedo para ver toda la canción.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+              ),
+          ]),
+          _panelLabel('Compartir y exportar'),
+          _panelCard([
+            ListTile(
+              leading: const Icon(Icons.ios_share, color: AppColors.accent),
+              title: const Text('Compartir letra'),
+              subtitle: const Text('Texto con acordes en el tono actual'),
+              onTap: () async {
+                Navigator.pop(context);
+                await shareSongText(hostContext, song, semitones: config.semitones, lyricsOnly: config.lyricsOnly);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.picture_as_pdf, color: AppColors.warm),
+              title: const Text('Exportar PDF'),
+              subtitle: const Text('Canción en el tono actual, lista para imprimir'),
+              onTap: () async {
+                Navigator.pop(context);
+                await shareSongPdf(hostContext, song, semitones: config.semitones, lyricsOnly: config.lyricsOnly);
+              },
+            ),
+          ]),
+          _panelLabel('Canción'),
+          _panelCard([
+            ListTile(
+              leading: const Icon(Icons.edit),
+              title: const Text('Editar letra y acordes'),
+              onTap: () async {
+                Navigator.pop(context);
+                await onEdit();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete, color: Colors.redAccent),
+              title: const Text('Eliminar', style: TextStyle(color: Colors.redAccent)),
+              onTap: () {
+                Navigator.pop(context);
+                onDelete();
+              },
+            ),
+          ]),
+          const SizedBox(height: 16),
+        ]),
+      ),
+    );
+  }
+}

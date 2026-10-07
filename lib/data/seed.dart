@@ -1,5 +1,9 @@
-import 'models.dart';
+import '../models/app_state.dart';
+import '../models/setlist.dart';
+import '../models/song.dart';
 
+/// Estado inicial de demostración: canciones de ejemplo originales + himnos
+/// tradicionales de dominio público (para un repertorio inicial legal).
 AppState seedState() {
   return AppState(
     groups: [
@@ -267,4 +271,3 @@ const _pd6 = 'Verso 1\n'
     '[Em]venid, adoremos a [D]Cristo el Se[C]ñor\n'
     '[G]Venid, ado[Em]remos, cada [C]fiel ado[G]remos\n'
     '[Em]venid, adoremos a [D]Cristo el Se[G]ñor\n';
-

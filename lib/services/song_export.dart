@@ -1,21 +1,14 @@
-// Ayudantes de exportación/compartición: texto legible y PDF de canciones y
-// setlists, reutilizados desde la vista de canción, los setlists y Ajustes.
-import 'dart:io';
+// Exportación y compartición de canciones: texto legible con acordes
+// alineados y PDF listo para imprimir, transpuestos al tono actual.
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
-import 'models.dart';
-import 'setlist_export.dart';
-import 'songs.dart';
-
-String _safeName(String s) =>
-    s.replaceAll(RegExp(r'[\\/:*?"<>|]'), '').replaceAll(RegExp(r'\s+'), '_').trim().isEmpty
-        ? 'export'
-        : s.replaceAll(RegExp(r'[\\/:*?"<>|\s]+'), '_').trim();
+import '../data/chord_parser.dart';
+import '../models/song.dart';
+import 'share_utils.dart';
 
 /// Convierte una canción a texto legible, con cada acorde (transpuesto si
 /// [semitones] != 0) escrito encima de la palabra que le corresponde.
@@ -143,22 +136,9 @@ Uint8List buildSongPdf(Song song, {int semitones = 0, bool lyricsOnly = false}) 
   }
 }
 
-Future<File> _tempPdf(String name, Uint8List bytes) async {
-  final dir = await getTemporaryDirectory();
-  final file = File('${dir.path}/${_safeName(name)}.pdf');
-  await file.writeAsBytes(bytes);
-  return file;
-}
-
-Rect? _shareOrigin(BuildContext context) {
-  final box = context.findRenderObject() as RenderBox?;
-  if (box == null || !box.hasSize) return null;
-  return box.localToGlobal(Offset.zero) & box.size;
-}
-
 /// Comparte la letra como texto plano (con acordes encima, transpuestos).
 Future<void> shareSongText(BuildContext context, Song song, {int semitones = 0, bool lyricsOnly = false}) async {
-  final origin = _shareOrigin(context);
+  final origin = shareOrigin(context);
   try {
     await Share.share(
       songToPlainText(song, semitones: semitones, lyricsOnly: lyricsOnly),
@@ -174,10 +154,10 @@ Future<void> shareSongText(BuildContext context, Song song, {int semitones = 0, 
 
 /// Comparte la canción como PDF.
 Future<void> shareSongPdf(BuildContext context, Song song, {int semitones = 0, bool lyricsOnly = false}) async {
-  final origin = _shareOrigin(context);
+  final origin = shareOrigin(context);
   try {
     final bytes = buildSongPdf(song, semitones: semitones, lyricsOnly: lyricsOnly);
-    final file = await _tempPdf('${song.title}_tono_${transposeChord(song.key, semitones)}', bytes);
+    final file = await tempPdfFile('${song.title}_tono_${transposeChord(song.key, semitones)}', bytes);
     await Share.shareXFiles(
       [XFile(file.path, mimeType: 'application/pdf')],
       text: '${song.title} · Tono ${transposeChord(song.key, semitones)}',
@@ -186,24 +166,6 @@ Future<void> shareSongPdf(BuildContext context, Song song, {int semitones = 0, b
   } catch (e) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo exportar el PDF: $e')));
-    }
-  }
-}
-
-/// Comparte el PDF de un setlist (reutiliza `buildSetlistPdf`).
-Future<void> shareSetlistPdf(BuildContext context, Setlist list, List<Song> songs) async {
-  final origin = _shareOrigin(context);
-  try {
-    final bytes = buildSetlistPdf(list, songs);
-    final file = await _tempPdf('${list.name}_setlist', bytes);
-    await Share.shareXFiles(
-      [XFile(file.path, mimeType: 'application/pdf')],
-      text: 'Setlist "${list.name}" · ${list.date}',
-      sharePositionOrigin: origin,
-    );
-  } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo exportar el setlist: $e')));
     }
   }
 }

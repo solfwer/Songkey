@@ -1,9 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'models.dart';
+import '../models/app_state.dart';
 import 'seed.dart';
 
+/// Estado de la app + persistencia local (SharedPreferences/JSON).
 class Store extends ChangeNotifier {
   static const _key = 'Songkey-v1';
   AppState state = seedState();

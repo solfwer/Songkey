@@ -1,3 +1,5 @@
+// Parser y utilidades de ChordPro: modelo de líneas/secciones, detección de
+// acordes y de encabezados, transposición y soporte para el editor visual.
 
 class Segment {
   final String? chord;
@@ -195,7 +197,7 @@ String transposeChord(String chord, int st) {
 }
 
 // ============================================================
-// NUEVO: Modelo de acordes posicionados (para editor visual)
+// Modelo de acordes posicionados (para el editor visual)
 // ============================================================
 
 /// Un acorde anclado a una posición absoluta en el texto plano de la canción.
@@ -348,9 +350,3 @@ List<String> commonExtensions(String baseChord) {
   if (!isMinor) ext.add('${root}maj7');
   return ext;
 }
-
-
-
-
-
-

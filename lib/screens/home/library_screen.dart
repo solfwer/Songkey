@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../songs.dart';
-import '../store.dart';
-import '../theme.dart';
-import 'song_screen.dart';
+import '../../data/chord_parser.dart';
+import '../../data/store.dart';
+import '../../theme.dart';
+import '../song/song_editor_page.dart';
+import '../song/song_screen.dart';
 
 class LibraryScreen extends StatefulWidget {
   final Store store;
@@ -85,5 +86,3 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 }
-
-

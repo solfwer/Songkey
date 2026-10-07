@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:appchords/exporters.dart';
-import 'package:appchords/models.dart';
-import 'package:appchords/screens/song_screen.dart';
-import 'package:appchords/store.dart';
+import 'package:appchords/models/app_state.dart';
+import 'package:appchords/models/song.dart';
+import 'package:appchords/screens/song/song_screen.dart';
+import 'package:appchords/services/song_export.dart';
+import 'package:appchords/data/store.dart';
 import 'package:appchords/theme.dart';
 
 AppState _stateWithSong([String body = 'Verso 1\n[Am]Hola [F]mundo\n[G]Otra línea con más texto para que envuelva\n\nCoro\n[C]Lalalala\n']) {
