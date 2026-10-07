@@ -18,9 +18,18 @@ class Section {
   Section({required this.id, required this.kind, required this.abbr, required this.label, required this.lines});
 }
 
+String _deaccent(String s) => s
+    .toLowerCase()
+    .replaceAll('á', 'a')
+    .replaceAll('é', 'e')
+    .replaceAll('í', 'i')
+    .replaceAll('ó', 'o')
+    .replaceAll('ú', 'u')
+    .replaceAll('ü', 'u')
+    .replaceAll('ñ', 'n');
+
 final _header = RegExp(
-  r'^\s*[[{(]?\s*(coro|chorus|estribillo|pre-?coro|pre-?chorus|verso|verse|estrofa|puente|bridge|intro|outro|final|tag|interludio|instrumental)\s*(\d*)\s*[\]})]?\s*:?\s*$',
-  caseSensitive: false,
+  r'^\s*[[{(]?\s*(coro|chorus|estribillo|pre-?coro|pre-?chorus|verso|verse|estrofa|puente|bridge|intro|outro|final|tag|interludio|instrumental|transicion)\s*(\d*)\s*[\]})]?\s*:?\s*$',
 );
 
 final _chord = RegExp(
@@ -30,7 +39,7 @@ final _chord = RegExp(
 bool isChord(String t) => _chord.hasMatch(t);
 
 /// Reconoce líneas que actúan como encabezado de sección ("Verso 1", "Coro", etc.)
-bool isSectionHeader(String line) => _header.hasMatch(line);
+bool isSectionHeader(String line) => _header.hasMatch(_deaccent(line));
 
 /// Desplazamiento en semitonos del tono `from` al tono `to` (ambas pueden ser menores, ej. "Bm").
 int semitoneShift(String from, String to) {
@@ -51,7 +60,16 @@ bool isChordLine(String line) {
 }
 
 ({SectionKind kind, String abbr, String label}) headerInfo(String word, String num) {
-  final w = word.toLowerCase().replaceAll('-', '');
+  final w = word
+      .toLowerCase()
+      .replaceAll('-', '')
+      .replaceAll('á', 'a')
+      .replaceAll('é', 'e')
+      .replaceAll('í', 'i')
+      .replaceAll('ó', 'o')
+      .replaceAll('ú', 'u')
+      .replaceAll('ü', 'u')
+      .replaceAll('ñ', 'n');
   final n = num;
   if (['coro', 'chorus', 'estribillo'].contains(w)) {
     return (kind: SectionKind.chorus, abbr: 'C$n', label: 'Coro $n');
@@ -68,6 +86,9 @@ bool isChordLine(String line) {
   if (w == 'intro') return (kind: SectionKind.intro, abbr: 'I', label: 'Intro');
   if (w == 'outro') return (kind: SectionKind.outro, abbr: 'O', label: 'Outro');
   if (w == 'final' || w == 'tag') return (kind: SectionKind.ending, abbr: 'F', label: 'Final');
+  if (w == 'transicion') return (kind: SectionKind.other, abbr: 'T', label: 'Transición ${n.isEmpty ? "" : n}'.trim());
+  if (w == 'instrumental') return (kind: SectionKind.other, abbr: 'Inst', label: 'Instrumental');
+  if (w == 'interludio') return (kind: SectionKind.other, abbr: 'Int', label: 'Interludio');
   return (kind: SectionKind.other, abbr: w.substring(0, w.length < 2 ? w.length : 2).toUpperCase(), label: word);
 }
 
@@ -120,7 +141,7 @@ List<Section> parseSong(String raw) {
 
   for (var i = 0; i < lines.length; i++) {
     final line = lines[i];
-    final h = _header.firstMatch(line);
+    final h = _header.firstMatch(_deaccent(line));
     if (h != null) {
       final info = headerInfo(h.group(1) ?? '', h.group(2) ?? '');
       cur = Section(
@@ -140,7 +161,7 @@ List<Section> parseSong(String raw) {
     final sec = ensure();
     if (isChordLine(line)) {
       final next = i + 1 < lines.length ? lines[i + 1] : null;
-      if (next != null && next.trim().isNotEmpty && !isChordLine(next) && !_header.hasMatch(next)) {
+      if (next != null && next.trim().isNotEmpty && !isChordLine(next) && !_header.hasMatch(_deaccent(next))) {
         sec.lines.add(mergeChordLine(line, next));
         i++;
       } else {
@@ -211,7 +232,7 @@ class PositionedChord {
   int lyricLineIdx = -1;
 
   for (final raw in rawLines) {
-    final h = _header.firstMatch(raw);
+    final h = _header.firstMatch(_deaccent(raw));
     if (h != null) {
       // Encabezado de sección -> lo guardamos como línea especial con prefijo
       lyricLines.add(raw.trim());
