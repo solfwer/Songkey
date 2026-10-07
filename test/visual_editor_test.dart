@@ -58,6 +58,22 @@ void main() {
     expect(find.byType(VisualChordEditor), findsOneWidget);
   });
 
+  testWidgets('tocar una linea abre el selector de acordes sin crashear', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: VisualChordEditor(
+          initialBody: 'Verso 1\nHola mundo',
+          songKey: 'C',
+          onChanged: (_) {},
+        ),
+      ),
+    ));
+    await tester.tap(find.text('Hola mundo'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Acordes de la tonalidad'), findsOneWidget);
+  });
+
   testWidgets('SongEditorPage no desborda en pantalla angosta de telefono', (tester) async {
     tester.view.physicalSize = const Size(260, 560);
     tester.view.devicePixelRatio = 1.0;

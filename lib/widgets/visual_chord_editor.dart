@@ -24,6 +24,9 @@ class _VisualChordEditorState extends State<VisualChordEditor> {
   int _selectedChordIdx = -1;
   int _selectedLine = -1;
   int _tapCharIndex = 0;
+  // Clave por línea para obtener su RenderBox real (el contexto del itemBuilder
+  // apunta al Sliver, no al ítem).
+  final Map<int, GlobalKey> _lineKeys = {};
 
   // Undo/Redo stacks
   final List<({List<String> lines, List<PositionedChord> chords, int selIdx, int selLine, int tapChar})> _undoStack = [];
@@ -95,11 +98,14 @@ class _VisualChordEditorState extends State<VisualChordEditor> {
   }
 
   // --- Interacción ---
-  void _onLineTap(int lineIdx, TapDownDetails details, RenderBox box) {
+  void _onLineTap(int lineIdx, TapDownDetails details, GlobalKey lineKey) {
     if (widget.readOnly) return;
     if (lineIdx < 0 || lineIdx >= _lyricLines.length) return;
     final line = _lyricLines[lineIdx];
     if (isSectionHeader(line)) return; // no colocar acordes en encabezados
+
+    final box = lineKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.attached) return;
 
     final offset = box.globalToLocal(details.globalPosition);
     // Descontar el prefijo visual: padding izq (8) + número de línea (36) + hueco (8).
@@ -239,13 +245,15 @@ class _VisualChordEditorState extends State<VisualChordEditor> {
           child: ListView.builder(
             padding: const EdgeInsets.all(16),
             itemCount: _lyricLines.length,
-            itemBuilder: (ctx, i) {
+            itemBuilder: (_, i) {
               final line = _lyricLines[i];
               final isHeader = isSectionHeader(line);
               final lineChords = _chords.where((c) => c.lineIndex == i).toList()..sort((a, b) => a.charIndex.compareTo(b.charIndex));
+              final lineKey = _lineKeys.putIfAbsent(i, () => GlobalKey());
               return GestureDetector(
-                onTapDown: widget.readOnly || isHeader ? null : (d) => _onLineTap(i, d, ctx.findRenderObject()! as RenderBox),
+                onTapDown: widget.readOnly || isHeader ? null : (d) => _onLineTap(i, d, lineKey),
                 child: Container(
+                  key: lineKey,
                   padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 8),
                   margin: const EdgeInsets.symmetric(vertical: 2),
                   decoration: BoxDecoration(
@@ -298,7 +306,7 @@ class _LyricLineWithChords extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (chords.isEmpty) return SelectableText(line, style: style);
+    if (chords.isEmpty) return Text(line, style: style);
 
     final spans = <InlineSpan>[];
     int last = 0;
@@ -327,7 +335,7 @@ class _LyricLineWithChords extends StatelessWidget {
       last = idx;
     }
     if (last < line.length) spans.add(TextSpan(text: line.substring(last), style: style));
-    return SelectableText.rich(TextSpan(children: spans, style: style));
+    return Text.rich(TextSpan(children: spans, style: style));
   }
 }
 
