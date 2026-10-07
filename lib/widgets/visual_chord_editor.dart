@@ -205,19 +205,32 @@ class _VisualChordEditorState extends State<VisualChordEditor> {
         // Toolbar
         if (!widget.readOnly)
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
             decoration: BoxDecoration(color: AppColors.card, border: Border(bottom: BorderSide(color: Colors.grey[800]!))),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                IconButton(icon: const Icon(Icons.undo), tooltip: 'Deshacer', onPressed: _undoStack.isNotEmpty ? _undo : null),
-                IconButton(icon: const Icon(Icons.redo), tooltip: 'Rehacer', onPressed: _redoStack.isNotEmpty ? _redo : null),
-                const SizedBox(width: 8),
-                const Text('Editor visual de acordes', style: TextStyle(fontWeight: FontWeight.bold)),
-                const Spacer(),
-                IconButton(icon: const Icon(Icons.chevron_left), tooltip: 'Mover acorde ←', onPressed: _selectedChordIdx >= 0 ? () => _nudgeSelected(-1) : null),
-                IconButton(icon: const Icon(Icons.chevron_right), tooltip: 'Mover acorde →', onPressed: _selectedChordIdx >= 0 ? () => _nudgeSelected(1) : null),
-                IconButton(icon: const Icon(Icons.keyboard_arrow_up), tooltip: 'Subir línea', onPressed: _selectedChordIdx >= 0 ? () => _moveSelectedLine(-1) : null),
-                IconButton(icon: const Icon(Icons.keyboard_arrow_down), tooltip: 'Bajar línea', onPressed: _selectedChordIdx >= 0 ? () => _moveSelectedLine(1) : null),
+                Row(
+                  children: [
+                    IconButton(icon: const Icon(Icons.undo), tooltip: 'Deshacer', visualDensity: VisualDensity.compact, onPressed: _undoStack.isNotEmpty ? _undo : null),
+                    IconButton(icon: const Icon(Icons.redo), tooltip: 'Rehacer', visualDensity: VisualDensity.compact, onPressed: _redoStack.isNotEmpty ? _redo : null),
+                    const SizedBox(width: 4),
+                    const Expanded(child: Text('Editor visual de acordes', overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold))),
+                  ],
+                ),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      const Padding(padding: EdgeInsets.only(left: 8, right: 4), child: Text('Mover acorde / línea:', style: TextStyle(color: Colors.grey, fontSize: 12))),
+                      IconButton(icon: const Icon(Icons.chevron_left), tooltip: 'Mover acorde ←', onPressed: _selectedChordIdx >= 0 ? () => _nudgeSelected(-1) : null),
+                      IconButton(icon: const Icon(Icons.chevron_right), tooltip: 'Mover acorde →', onPressed: _selectedChordIdx >= 0 ? () => _nudgeSelected(1) : null),
+                      Container(width: 1, height: 24, margin: const EdgeInsets.symmetric(horizontal: 6), color: Colors.grey),
+                      IconButton(icon: const Icon(Icons.keyboard_arrow_up), tooltip: 'Subir de línea', onPressed: _selectedChordIdx >= 0 ? () => _moveSelectedLine(-1) : null),
+                      IconButton(icon: const Icon(Icons.keyboard_arrow_down), tooltip: 'Bajar de línea', onPressed: _selectedChordIdx >= 0 ? () => _moveSelectedLine(1) : null),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -350,9 +363,11 @@ class _ChordPickerSheet extends StatelessWidget {
               children: [
                 const Icon(Icons.music_note, color: AppColors.primary),
                 const SizedBox(width: 8),
-                Text('Insertar acorde en "$previewShort"',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-                const Spacer(),
+                Expanded(
+                  child: Text('Insertar acorde en "$previewShort"',
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                ),
                 if (onDelete != null)
                   TextButton.icon(icon: const Icon(Icons.delete, color: Colors.redAccent), label: const Text('Eliminar', style: TextStyle(color: Colors.redAccent)), onPressed: onDelete),
               ],

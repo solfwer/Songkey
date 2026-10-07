@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:appchords/screens/song_screen.dart';
 import 'package:appchords/songs.dart';
+import 'package:appchords/store.dart';
 import 'package:appchords/widgets/visual_chord_editor.dart';
 
 void main() {
@@ -54,5 +56,17 @@ void main() {
     ));
     expect(find.text('Editor visual de acordes'), findsOneWidget);
     expect(find.byType(VisualChordEditor), findsOneWidget);
+  });
+
+  testWidgets('SongEditorPage no desborda en pantalla angosta de telefono', (tester) async {
+    tester.view.physicalSize = const Size(260, 560);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final store = Store();
+    await tester.pumpWidget(MaterialApp(home: SongEditorPage(store: store)));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
   });
 }
