@@ -1,5 +1,6 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 
+import '../exporters.dart';
 import '../models.dart';
 import '../store.dart';
 import 'setlist_songs_screen.dart';
@@ -45,6 +46,7 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
                           title: Text(l.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                           subtitle: Text('${l.date} Â· ${l.songIds.length} temas Â· ${l.members.length} invitados'),
                           trailing: Wrap(spacing: 0, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                            IconButton(icon: const Icon(Icons.picture_as_pdf), tooltip: 'Exportar PDF', onPressed: () => shareSetlistPdf(context, l, s.songs)),
                             IconButton(icon: const Icon(Icons.edit), onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SetlistDetailScreen(store: widget.store, setlistId: l.id)))),
                             const Icon(Icons.chevron_right),
                           ]),
@@ -212,7 +214,16 @@ class _SetlistDetailScreenState extends State<SetlistDetailScreen> {
     final l = list;
     if (l == null) return Scaffold(appBar: AppBar(), body: const Center(child: Text('Setlist no encontrado')));
     return Scaffold(
-      appBar: AppBar(title: Text(l.name, overflow: TextOverflow.ellipsis)),
+      appBar: AppBar(
+        title: Text(l.name, overflow: TextOverflow.ellipsis),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.picture_as_pdf),
+            tooltip: 'Exportar setlist en PDF',
+            onPressed: () => shareSetlistPdf(context, l, widget.store.state.songs),
+          ),
+        ],
+      ),
       body: SingleChildScrollView(padding: const EdgeInsets.all(16), child: _Editor(store: widget.store, list: l, mName: mName, mRole: mRole, onChanged: () => setState(() {}))),
     );
   }

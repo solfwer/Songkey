@@ -1,11 +1,7 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 
+import '../exporters.dart';
 import '../seed.dart';
-import '../setlist_export.dart';
 import '../store.dart';
 import 'home_splash.dart';
 
@@ -48,18 +44,8 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             title: Text(l.name),
             subtitle: Text('${l.songIds.length} canciones'),
-            trailing: const Icon(Icons.picture_as_pdf),
-            onTap: () async {
-              try {
-                final bytes = buildSetlistPdf(l, store.state.songs);
-                final tmpDir = await getTemporaryDirectory();
-                final file = File('${tmpDir.path}/${l.name}_setlist.pdf');
-                await file.writeAsBytes(bytes);
-                await Share.shareXFiles([XFile(file.path)], text: 'Setlist "${l.name}"');
-              } catch (e) {
-                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-              }
-            },
+            leading: const Icon(Icons.picture_as_pdf),
+            onTap: () => shareSetlistPdf(context, l, store.state.songs),
           ),
         const Divider(),
         ListTile(

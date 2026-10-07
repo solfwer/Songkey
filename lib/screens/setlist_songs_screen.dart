@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../exporters.dart';
 import '../models.dart';
 import '../store.dart';
 import 'setlists_screen.dart' show SetlistDetailScreen;
@@ -23,6 +24,11 @@ class SetlistSongsScreen extends StatelessWidget {
           appBar: AppBar(
             title: Text(l.name, overflow: TextOverflow.ellipsis),
             actions: [
+              IconButton(
+                icon: const Icon(Icons.picture_as_pdf),
+                tooltip: 'Exportar setlist en PDF',
+                onPressed: () => shareSetlistPdf(context, l, store.state.songs),
+              ),
               IconButton(
                 icon: const Icon(Icons.edit_outlined),
                 onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SetlistDetailScreen(store: store, setlistId: l.id))),
