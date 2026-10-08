@@ -125,7 +125,7 @@ class _SetlistCard extends StatelessWidget {
   }
 }
 
-class _Editor extends StatelessWidget {
+class _Editor extends StatefulWidget {
   final Store store;
   final Setlist list;
   final TextEditingController mName;
@@ -133,22 +133,40 @@ class _Editor extends StatelessWidget {
   final VoidCallback onChanged;
   const _Editor({required this.store, required this.list, required this.mName, required this.mRole, required this.onChanged});
 
+  @override
+  State<_Editor> createState() => _EditorState();
+}
+
+class _EditorState extends State<_Editor> {
+  final _q = TextEditingController();
+
+  @override
+  void dispose() {
+    _q.dispose();
+    super.dispose();
+  }
+
   void update(Setlist Function(Setlist l) fn) {
-    store.update((s) {
-      final setlists = s.setlists.map((l) => l.id == list.id ? fn(l) : l).toList();
+    widget.store.update((s) {
+      final setlists = s.setlists.map((l) => l.id == widget.list.id ? fn(l) : l).toList();
       return AppState(groups: s.groups, songs: s.songs, setlists: setlists);
     });
-    onChanged();
+    widget.onChanged();
   }
 
   @override
   Widget build(BuildContext context) {
-    final s = store.state;
+    final s = widget.store.state;
+    final q = _q.text.trim().toLowerCase();
+    final candidates = s.songs
+        .where((x) => !widget.list.songIds.contains(x.id) && x.title.toLowerCase().contains(q))
+        .take(8)
+        .toList();
     return SingleChildScrollView(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         TextFormField(
-          key: ValueKey(list.id + list.name),
-          initialValue: list.name,
+          key: ValueKey(widget.list.id + widget.list.name),
+          initialValue: widget.list.name,
           style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
           decoration: const InputDecoration(border: InputBorder.none, isDense: true),
           onChanged: (v) => update((l) => l.copyWith(name: v)),
@@ -156,47 +174,47 @@ class _Editor extends StatelessWidget {
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
           DropdownButton<String?>(
-            value: list.groupId,
+            value: widget.list.groupId,
             hint: const Text('Sin grupo'),
             items: [null, ...s.groups.map((g) => g.id)].map((id) => DropdownMenuItem(value: id, child: Text(id == null ? 'Sin grupo' : s.groups.firstWhere((g) => g.id == id).name))).toList(),
             onChanged: (v) => update((l) => l.copyWith(groupId: v)),
           ),
           TextButton.icon(
             icon: const Icon(Icons.calendar_month, size: 18),
-            label: Text(formatShortDate(list.date)),
+            label: Text(formatShortDate(widget.list.date)),
             onPressed: () => _pickDate(context),
           ),
           TextButton(
             onPressed: () async {
               final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(title: const Text('Eliminar setlist'), actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Eliminar'))]));
-              if (ok == true) store.update((st) => AppState(groups: st.groups, songs: st.songs, setlists: st.setlists.where((l) => l.id != list.id).toList()));
+              if (ok == true) widget.store.update((st) => AppState(groups: st.groups, songs: st.songs, setlists: st.setlists.where((l) => l.id != widget.list.id).toList()));
             },
             child: const Text('Eliminar setlist', style: TextStyle(color: Colors.redAccent)),
           ),
         ]),
         const SizedBox(height: 8),
         TextFormField(
-          key: ValueKey(list.id + list.venue),
-          initialValue: list.venue,
+          key: ValueKey(widget.list.id + widget.list.venue),
+          initialValue: widget.list.venue,
           decoration: const InputDecoration(labelText: 'Lugar / ocasión', isDense: true),
           onChanged: (v) => update((l) => l.copyWith(venue: v)),
         ),
         const SizedBox(height: 12),
-        if (list.songIds.isEmpty)
-          const Text('Sin canciones todavía. Añade una con el selector de abajo.', style: TextStyle(color: Colors.grey))
+        if (widget.list.songIds.isEmpty)
+          const Text('Sin canciones todavía. Búscalas con el campo de abajo.', style: TextStyle(color: Colors.grey))
         else ...[
           const Text('Arrastra el icono = para cambiar el orden.', style: TextStyle(color: Colors.grey, fontSize: 12)),
           const SizedBox(height: 4),
           ReorderableListView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            itemCount: list.songIds.length,
+            itemCount: widget.list.songIds.length,
             onReorderItem: (oldIndex, newIndex) => move(oldIndex, newIndex),
             itemBuilder: (context, index) {
-              final id = list.songIds[index];
+              final id = widget.list.songIds[index];
               final song = s.songs.where((x) => x.id == id).firstOrNull;
               if (song == null) return const SizedBox.shrink();
-              final ready = list.readyIds.contains(song.id);
+              final ready = widget.list.readyIds.contains(song.id);
               return Card(
                 key: ValueKey(song.id),
                 child: ListTile(
@@ -209,7 +227,7 @@ class _Editor extends StatelessWidget {
                   ]),
                   title: Text(song.title),
                   subtitle: Text('Tono ${song.key}'),
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongScreen(store: store, songId: song.id, setlistId: list.id))),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongScreen(store: widget.store, songId: song.id, setlistId: widget.list.id))),
                   trailing: Wrap(spacing: 0, children: [
                     Checkbox(
                       value: ready,
@@ -222,16 +240,33 @@ class _Editor extends StatelessWidget {
             },
           ),
         ],
-        const SizedBox(height: 8),
-        DropdownButton<String>(
-          hint: const Text('+ Añadir canción…'),
-          value: null,
-          items: s.songs.where((x) => !list.songIds.contains(x.id)).map((x) => DropdownMenuItem(value: x.id, child: Text('${x.title} (${x.key})'))).toList(),
-          onChanged: (v) { if (v != null) update((l) => l.copyWith(songIds: [...l.songIds, v])); },
+        const SizedBox(height: 12),
+        TextField(
+          controller: _q,
+          decoration: const InputDecoration(labelText: 'Buscar canción para añadir', prefixIcon: Icon(Icons.search), isDense: true),
+          onChanged: (_) => setState(() {}),
         ),
+        const SizedBox(height: 4),
+        if (q.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Text('Escribe el nombre de una canción de tu biblioteca para añadirla al setlist.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+          )
+        else if (candidates.isEmpty)
+          const Padding(padding: EdgeInsets.all(8), child: Text('Sin coincidencias', style: TextStyle(color: Colors.grey)))
+        else
+          for (final c in candidates)
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.playlist_add),
+              title: Text(c.title, overflow: TextOverflow.ellipsis),
+              subtitle: Text('Tono ${c.key}'),
+              trailing: const Icon(Icons.add_circle_outline, size: 20),
+              onTap: () => update((l) => l.copyWith(songIds: [...l.songIds, c.id])),
+            ),
         const Divider(),
         const Text('Banda invitada', style: TextStyle(letterSpacing: 2, color: Colors.grey)),
-        for (final m in list.members)
+        for (final m in widget.list.members)
           ListTile(
             leading: CircleAvatar(child: Text(m.name.isEmpty ? '?' : m.name.substring(0, 1).toUpperCase())),
             title: Text('${m.name} · ${m.role}'),
@@ -241,10 +276,10 @@ class _Editor extends StatelessWidget {
             ]),
           ),
         Row(children: [
-          Expanded(child: TextField(controller: mName, decoration: const InputDecoration(hintText: 'Nombre'), onSubmitted: (_) => invite())),
+          Expanded(child: TextField(controller: widget.mName, decoration: const InputDecoration(hintText: 'Nombre'), onSubmitted: (_) => invite())),
         ]),
         Row(children: [
-          Expanded(child: TextField(controller: mRole, decoration: const InputDecoration(hintText: 'Rol (voz, guitarra…)'), onSubmitted: (_) => invite())),
+          Expanded(child: TextField(controller: widget.mRole, decoration: const InputDecoration(hintText: 'Rol (voz, guitarra…)'), onSubmitted: (_) => invite())),
           IconButton(icon: const Icon(Icons.add), onPressed: invite),
         ]),
       ]),
@@ -252,7 +287,7 @@ class _Editor extends StatelessWidget {
   }
 
   Future<void> _pickDate(BuildContext context) async {
-    final parsed = DateTime.tryParse(list.date);
+    final parsed = DateTime.tryParse(widget.list.date);
     final picked = await showDatePicker(
       context: context,
       initialDate: parsed ?? DateTime.now(),
@@ -274,10 +309,10 @@ class _Editor extends StatelessWidget {
   }
 
   void invite() {
-    if (mName.text.trim().isEmpty) return;
-    update((l) => l.copyWith(members: [...l.members, Member(id: uid(), name: mName.text.trim(), role: mRole.text.trim().isEmpty ? 'músico' : mRole.text.trim())]));
-    mName.clear();
-    mRole.clear();
+    if (widget.mName.text.trim().isEmpty) return;
+    update((l) => l.copyWith(members: [...l.members, Member(id: uid(), name: widget.mName.text.trim(), role: widget.mRole.text.trim().isEmpty ? 'músico' : widget.mRole.text.trim())]));
+    widget.mName.clear();
+    widget.mRole.clear();
   }
 }
 

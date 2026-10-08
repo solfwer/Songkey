@@ -1,20 +1,16 @@
-// Vista de canción: orquesta la cabecera (selector de tono, BPM, modo
-// presentación), las chips de secciones (salto al tocar), el cuerpo (vista
-// "página" o "ajustar todo"/presentación) y el panel lateral de opciones.
-// El dibujo de líneas/chips vive en widgets/song_view.dart, el panel en
-// widgets/view_options_panel.dart y el editor en song_editor_page.dart.
-import 'dart:async';
-
+// Vista de canción: orquesta la cabecera (selector de tono), el cuerpo
+// (vista normal) y el panel lateral de opciones. Si la canción viene de un
+// setlist, el cuerpo es un PageView horizontal: se pasa de una canción a otra
+// deslizando el dedo (sin botones). El dibujo de líneas/chips vive en
+// widgets/song_view.dart, el panel en widgets/view_options_panel.dart y el
+// editor en song_editor_page.dart.
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../data/chord_parser.dart';
 import '../../data/format.dart';
 import '../../data/store.dart';
 import '../../models/app_state.dart';
-import '../../models/setlist.dart';
 import '../../models/song.dart';
-import '../../theme.dart';
 import 'song_editor_page.dart';
 import 'widgets/song_view.dart';
 import 'widgets/view_options_panel.dart';
@@ -36,75 +32,50 @@ class _SongScreenState extends State<SongScreen> {
     americanNotation: widget.store.americanNotation,
   );
   final _scaffoldKey = GlobalKey<ScaffoldState>();
-  final _focusNode = FocusNode();
-  final _scrollController = ScrollController();
-  final Map<String, GlobalKey> _sectionKeys = {};
 
-  // Estado calculado del modo "ajustar todo" (se regenera en cada build).
-  double _fitFontSize = 16;
-  bool _fitUseTwoColumns = false;
-  double _fitAvailableHeight = 0;
-  List<Section> _fitSections = [];
+  // Navegación por deslizamiento entre canciones de un setlist.
+  PageController? _pageController;
+  int _pageIndex = 0;
+  String _visibleSongId = '';
 
   @override
   void initState() {
     super.initState();
-    _focusNode.addListener(() {});
+    final s = widget.store.state;
+    final ids = _setlistSongIds(s);
+    var idx = ids.indexOf(widget.songId);
+    if (idx < 0) idx = 0;
+    _pageIndex = idx;
+    _visibleSongId = ids.isEmpty ? widget.songId : ids[idx];
+    if (ids.length > 1) {
+      _pageController = PageController(initialPage: _pageIndex);
+    }
     // Marcar como recién abierta para "Canciones recientes" del inicio.
-    WidgetsBinding.instance.addPostFrameCallback((_) => widget.store.markSongOpened(widget.songId));
+    WidgetsBinding.instance.addPostFrameCallback((_) => widget.store.markSongOpened(_visibleSongId));
   }
 
   @override
   void dispose() {
-    _focusNode.dispose();
-    _scrollController.dispose();
-    if (config.fitToScreen) _setSystemUiMode(false);
+    _pageController?.dispose();
     super.dispose();
   }
 
-  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (!config.fitToScreen) return KeyEventResult.ignored;
-    if (event is KeyDownEvent) {
-      if (event.logicalKey == LogicalKeyboardKey.arrowRight || event.logicalKey == LogicalKeyboardKey.pageDown) {
-        _nextFitPage();
-        return KeyEventResult.handled;
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft || event.logicalKey == LogicalKeyboardKey.pageUp) {
-        _prevFitPage();
-        return KeyEventResult.handled;
-      }
-    }
-    return KeyEventResult.ignored;
+  /// Ids visibles del setlist (ignorando canciones borradas).
+  List<String> _setlistSongIds(AppState s) {
+    if (widget.setlistId == null) return const [];
+    final list = s.setlists.where((l) => l.id == widget.setlistId).firstOrNull;
+    if (list == null) return const [];
+    return list.songIds.where((id) => s.songs.any((x) => x.id == id)).toList();
   }
 
-  void _nextFitPage() {
-    final pages = _calculateFitPages(context);
-    if (config.fitPage < pages - 1) {
-      setState(() => config.fitPage++);
-    } else if (widget.setlistId != null) {
-      // Avanzar a siguiente canción en setlist
-      final s = widget.store.state;
-      final list = s.setlists.where((l) => l.id == widget.setlistId).firstOrNull;
-      final idx = list?.songIds.indexOf(widget.songId) ?? -1;
-      final next = list != null && idx >= 0 && idx < list.songIds.length - 1 ? list.songIds[idx + 1] : null;
-      if (next != null) {
-        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => SongScreen(store: widget.store, songId: next, setlistId: list!.id)));
-      }
-    }
-  }
-
-  void _prevFitPage() {
-    if (config.fitPage > 0) {
-      setState(() => config.fitPage--);
-    } else if (widget.setlistId != null) {
-      // Retroceder a canción anterior en setlist
-      final s = widget.store.state;
-      final list = s.setlists.where((l) => l.id == widget.setlistId).firstOrNull;
-      final idx = list?.songIds.indexOf(widget.songId) ?? -1;
-      final prev = list != null && idx > 0 ? list.songIds[idx - 1] : null;
-      if (prev != null) {
-        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => SongScreen(store: widget.store, songId: prev, setlistId: list!.id)));
-      }
-    }
+  void _onPageChanged(int p) {
+    final ids = _setlistSongIds(widget.store.state);
+    if (p < 0 || p >= ids.length) return;
+    setState(() {
+      _pageIndex = p;
+      _visibleSongId = ids[p];
+    });
+    widget.store.markSongOpened(ids[p]);
   }
 
   Future<void> _delete(Song song) async {
@@ -119,136 +90,6 @@ class _SongScreenState extends State<SongScreen> {
     }
   }
 
-  // --- Tono y modo presentación ---
-
-  String _displayedKey(Song song) =>
-      notateChord(sharpen(transposeChord(song.key, config.semitones)), american: config.americanNotation);
-
-  void _setSystemUiMode(bool immersive) {
-    unawaited(SystemChrome.setEnabledSystemUIMode(immersive ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge).catchError((Object _) {}));
-  }
-
-  void _togglePresentation() {
-    setState(() {
-      config.fitToScreen = !config.fitToScreen;
-      config.fitPage = 0;
-    });
-    _setSystemUiMode(config.fitToScreen);
-  }
-
-  String _metaLine(Song song) {
-    final group = widget.store.state.groups.where((g) => g.id == song.groupId).map((g) => g.name).firstOrNull;
-    final parts = <String>[
-      group ?? 'Sin grupo',
-      if (song.style != null && song.style!.isNotEmpty) song.style!,
-      'Tono: ${_displayedKey(song)}',
-      if (song.bpm != null) '${song.bpm} BPM',
-      if (formatDuration(song.durationSec).isNotEmpty) formatDuration(song.durationSec),
-    ];
-    return parts.join(' · ');
-  }
-
-  void _scrollToSection(Section sec) {
-    if (config.fitToScreen) {
-      final pages = _calculateFitPages(context);
-      final pageSections = _splitSectionsForPages(_fitSections, pages, _fitAvailableHeight, _fitFontSize);
-      final page = pageSections.indexWhere((p) => p.any((s) => s.id == sec.id));
-      if (page >= 0 && page != config.fitPage) setState(() => config.fitPage = page);
-      return;
-    }
-    final ctx = _sectionKeys[sec.id]?.currentContext;
-    if (ctx != null) {
-      Scrollable.ensureVisible(ctx, duration: const Duration(milliseconds: 300), curve: Curves.easeOut, alignment: 0.06);
-    }
-  }
-
-  // --- Fit-to-screen helpers ---
-  int _calculateFitPages(BuildContext context) {
-    final song = widget.store.state.songs.where((x) => x.id == widget.songId).firstOrNull;
-    final sections = parseSong(song?.body ?? '');
-    if (sections.isEmpty) return 1;
-
-    final mediaQuery = MediaQuery.of(context);
-    final availableHeight = mediaQuery.size.height - mediaQuery.padding.top - mediaQuery.padding.bottom - kToolbarHeight - 80;
-    final availableWidth = mediaQuery.size.width - 32;
-    final isLandscape = mediaQuery.orientation == Orientation.landscape;
-    final useTwoColumns = isLandscape && availableWidth > 600;
-
-    const baseFontSize = 16.0;
-    const lineHeight = 1.35;
-    const sectionGap = 26.0;
-    const headerHeight = 24.0;
-
-    double totalHeight = 0;
-    for (final sec in sections) {
-      totalHeight += headerHeight;
-      for (final line in sec.lines) {
-        totalHeight += line.isEmpty ? 10 : (baseFontSize * lineHeight + 2);
-      }
-      totalHeight += sectionGap;
-    }
-
-    double minFont = 10;
-    double maxFont = 28;
-    int pages = 1;
-    double bestFont = baseFontSize;
-
-    while (minFont <= maxFont) {
-      final mid = (minFont + maxFont) / 2;
-      final scale = mid / baseFontSize;
-      final scaledHeight = totalHeight * scale;
-      final cols = useTwoColumns ? 2 : 1;
-      final neededPages = (scaledHeight / (availableHeight / cols)).ceil().clamp(1, 10);
-
-      if (mid >= config.fitMinFont || neededPages <= 2) {
-        bestFont = mid;
-        pages = neededPages;
-        minFont = mid + 1;
-      } else {
-        maxFont = mid - 1;
-      }
-    }
-
-    _fitFontSize = bestFont;
-    _fitUseTwoColumns = useTwoColumns;
-    _fitAvailableHeight = availableHeight / (useTwoColumns ? 2 : 1);
-    _fitSections = sections;
-    return pages;
-  }
-
-  List<List<Section>> _splitSectionsForPages(List<Section> sections, int pages, double availableHeight, double fontSize) {
-    if (pages <= 1) return [sections];
-    const lineHeight = 1.35;
-    const sectionGap = 26.0;
-    const headerHeight = 24.0;
-
-    final result = <List<Section>>[];
-    var currentPage = <Section>[];
-    double currentHeight = 0;
-    final targetHeight = availableHeight * 0.95;
-
-    for (final sec in sections) {
-      double secHeight = headerHeight;
-      for (final line in sec.lines) {
-        secHeight += line.isEmpty ? 10 : (fontSize * lineHeight + 2);
-      }
-      secHeight += sectionGap;
-
-      if (currentPage.isNotEmpty && currentHeight + secHeight > targetHeight && result.length < pages - 1) {
-        result.add(currentPage);
-        currentPage = [];
-        currentHeight = 0;
-      }
-      currentPage.add(sec);
-      currentHeight += secHeight;
-    }
-    if (currentPage.isNotEmpty) result.add(currentPage);
-    while (result.length < pages) {
-      result.add([]);
-    }
-    return result;
-  }
-
   @override
   Widget build(BuildContext context) {
     final s = widget.store.state;
@@ -256,156 +97,42 @@ class _SongScreenState extends State<SongScreen> {
     if (song == null) {
       return Scaffold(appBar: AppBar(), body: const Center(child: Text('Canción no encontrada')));
     }
-    final list = s.setlists.where((l) => l.id == widget.setlistId).firstOrNull;
-    final idx = list?.songIds.indexOf(widget.songId) ?? -1;
-    final prev = list != null && idx > 0 ? list.songIds[idx - 1] : null;
-    final next = list != null && idx >= 0 && idx < list.songIds.length - 1 ? list.songIds[idx + 1] : null;
-    final sections = parseSong(song.body);
-
-    // Mantener las claves de sección alineadas con las secciones actuales.
-    final ids = sections.map((x) => x.id).toSet();
-    _sectionKeys.removeWhere((k, _) => !ids.contains(k));
-    for (final sec in sections) {
-      _sectionKeys.putIfAbsent(sec.id, () => GlobalKey());
-    }
+    final ids = _setlistSongIds(s);
+    final swipe = ids.length > 1;
+    final displayed = swipe ? (s.songs.where((x) => x.id == _visibleSongId).firstOrNull ?? song) : song;
 
     return Scaffold(
       key: _scaffoldKey,
-      appBar: config.fitToScreen
-          ? null
-          : AppBar(
-              title: Text(song.title, overflow: TextOverflow.ellipsis),
-              actions: [
-                _KeySelector(song: song, value: config.semitones == 0 ? null : sharpen(transposeChord(song.key, config.semitones)), american: config.americanNotation, onSelected: (k) => setState(() => config.semitones = semitoneShift(song.key, k))),
-                IconButton(icon: const Icon(Icons.present_to_all), tooltip: 'Modo presentación', onPressed: _togglePresentation),
-                IconButton(icon: const Icon(Icons.tune), tooltip: 'Opciones de vista', onPressed: () => _scaffoldKey.currentState?.openEndDrawer()),
-              ],
-            ),
+      appBar: AppBar(
+        title: Text(displayed.title, overflow: TextOverflow.ellipsis),
+        actions: [
+          _KeySelector(song: displayed, value: config.semitones == 0 ? null : sharpen(transposeChord(displayed.key, config.semitones)), american: config.americanNotation, onSelected: (k) => setState(() => config.semitones = semitoneShift(displayed.key, k))),
+          IconButton(icon: const Icon(Icons.tune), tooltip: 'Opciones de vista', onPressed: () => _scaffoldKey.currentState?.openEndDrawer()),
+        ],
+      ),
       endDrawer: ViewOptionsPanel(
-        song: song,
+        song: displayed,
         hostContext: context,
         config: config,
-        focusNode: _focusNode,
-        onChanged: () {
-          setState(() {});
-          _setSystemUiMode(config.fitToScreen);
-        },
+        onChanged: () => setState(() {}),
         onEdit: () async {
-          await Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongEditorPage(store: widget.store, song: song)));
+          await Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongEditorPage(store: widget.store, song: displayed)));
           if (mounted) setState(() {});
         },
-        onDelete: () => _delete(song),
+        onDelete: () => _delete(displayed),
       ),
-      body: Focus(
-        focusNode: _focusNode,
-        onKeyEvent: _handleKeyEvent,
-        child: config.fitToScreen
-            ? SafeArea(bottom: false, child: _buildFitToScreen(context, song, list, idx, prev, next))
-            : _buildNormalView(context, song, list, idx, prev, next, sections),
-      ),
-    );
-  }
-
-  Widget _buildNormalView(BuildContext context, Song song, Setlist? list, int idx, String? prev, String? next, List<Section> sections) {
-    return Column(children: [
-      if (list != null)
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          child: Row(children: [
-            Text('${idx + 1} / ${list.songIds.length}'),
-            const Spacer(),
-            TextButton(onPressed: prev != null ? () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => SongScreen(store: widget.store, songId: prev, setlistId: list.id))) : null, child: const Text('Anterior')),
-            TextButton(onPressed: next != null ? () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => SongScreen(store: widget.store, songId: next, setlistId: list.id))) : null, child: const Text('Siguiente')),
-          ]),
-        ),
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        child: Text(_metaLine(song), style: const TextStyle(color: Colors.grey)),
-      ),
-      SectionChips(
-        sections: sections,
-        alphaOf: (_) => 0.25,
-        onSelect: _scrollToSection,
-        spacing: 8,
-        fontSize: 14,
-        verticalPadding: 4,
-      ),
-      Expanded(
-        child: SongBodyList(
-          sections: sections,
-          lyricsOnly: config.lyricsOnly,
-          semitones: config.semitones,
-          fontSize: config.fontSize,
-          american: config.americanNotation,
-          controller: _scrollController,
-          sectionKeys: _sectionKeys,
-        ),
-      ),
-    ]);
-  }
-
-  Widget _buildFitToScreen(BuildContext context, Song song, Setlist? list, int idx, String? prev, String? next) {
-    final pages = _calculateFitPages(context);
-    final pageSections = _splitSectionsForPages(_fitSections, pages, _fitAvailableHeight, _fitFontSize);
-    final currentPageSections = config.fitPage < pageSections.length ? pageSections[config.fitPage] : <Section>[];
-
-    int activePageOf(Section sec) => pageSections.indexWhere((p) => p.any((s) => s.id == sec.id));
-
-    return GestureDetector(
-      // Zonas de toque grandes: mitad izquierda = anterior, derecha = siguiente
-      onTapDown: (details) {
-        final width = MediaQuery.of(context).size.width;
-        if (details.globalPosition.dx < width / 2) {
-          _prevFitPage();
-        } else {
-          _nextFitPage();
-        }
-      },
-      child: Column(children: [
-        // Cabecera compacta
-        if (list != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Row(children: [
-              Text('${idx + 1} / ${list.songIds.length}'),
-              const Spacer(),
-              if (pages > 1)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(12)),
-                  child: Text('Pág ${config.fitPage + 1} / $pages', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.primary)),
-                ),
-            ]),
-          ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-          child: Text('${_metaLine(song)} · ${_fitFontSize.toInt()}sp', style: const TextStyle(color: Colors.grey, fontSize: 11)),
-        ),
-        // Chips de secciones
-        SectionChips(
-          sections: _fitSections,
-          alphaOf: (sec) => config.fitPage == activePageOf(sec) ? 0.3 : 0.1,
-          onSelect: _scrollToSection,
-          spacing: 6,
-          fontSize: 11,
-          verticalPadding: 2,
-        ),
-        // Contenido de la página actual
-        Expanded(
-          child: _fitUseTwoColumns
-              ? Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(child: FitPageColumn(sections: currentPageSections.take((currentPageSections.length / 2).ceil()).toList(), lyricsOnly: config.lyricsOnly, semitones: config.semitones, fontSize: _fitFontSize, american: config.americanNotation)),
-                    const VerticalDivider(width: 16, thickness: 1, color: Colors.grey),
-                    Expanded(child: FitPageColumn(sections: currentPageSections.skip((currentPageSections.length / 2).ceil()).toList(), lyricsOnly: config.lyricsOnly, semitones: config.semitones, fontSize: _fitFontSize, american: config.americanNotation)),
-                  ],
-                )
-              : FitPageColumn(sections: currentPageSections, lyricsOnly: config.lyricsOnly, semitones: config.semitones, fontSize: _fitFontSize, american: config.americanNotation),
-        ),
-        // Indicador de navegación inferior + salir del modo presentación
-        FitNavBar(fitPage: config.fitPage, pages: pages, onExit: _togglePresentation),
-      ]),
+      body: swipe
+          ? PageView.builder(
+              controller: _pageController,
+              itemCount: ids.length,
+              onPageChanged: _onPageChanged,
+              itemBuilder: (context, i) {
+                final pageSong = s.songs.where((x) => x.id == ids[i]).firstOrNull;
+                if (pageSong == null) return const SizedBox.shrink();
+                return _SongPage(song: pageSong, store: widget.store, config: config);
+              },
+            )
+          : _SongPage(song: displayed, store: widget.store, config: config),
     );
   }
 }
@@ -437,5 +164,89 @@ class _KeySelector extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Página de una canción: línea de metadatos, chips de secciones y cuerpo con
+/// desplazamiento propio. Una copia por canción del setlist dentro del
+/// PageView (para que cada una recuerde su scroll y sus saltos de sección).
+class _SongPage extends StatefulWidget {
+  final Song song;
+  final Store store;
+  final SongViewConfig config;
+  const _SongPage({required this.song, required this.store, required this.config});
+
+  @override
+  State<_SongPage> createState() => _SongPageState();
+}
+
+class _SongPageState extends State<_SongPage> {
+  final _scrollController = ScrollController();
+  final _sectionKeys = <String, GlobalKey>{};
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  String _displayedKey() =>
+      notateChord(sharpen(transposeChord(widget.song.key, widget.config.semitones)), american: widget.config.americanNotation);
+
+  String _metaLine() {
+    final group = widget.store.state.groups.where((g) => g.id == widget.song.groupId).map((g) => g.name).firstOrNull;
+    final parts = <String>[
+      group ?? 'Sin grupo',
+      if (widget.song.style != null && widget.song.style!.isNotEmpty) widget.song.style!,
+      'Tono: ${_displayedKey()}',
+      if (widget.song.bpm != null) '${widget.song.bpm} BPM',
+      if (formatDuration(widget.song.durationSec).isNotEmpty) formatDuration(widget.song.durationSec),
+    ];
+    return parts.join(' · ');
+  }
+
+  void _scrollToSection(Section sec) {
+    final ctx = _sectionKeys[sec.id]?.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(ctx, duration: const Duration(milliseconds: 300), curve: Curves.easeOut, alignment: 0.06);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sections = parseSong(widget.song.body);
+
+    // Mantener las claves de sección alineadas con las secciones actuales.
+    final ids = sections.map((x) => x.id).toSet();
+    _sectionKeys.removeWhere((k, _) => !ids.contains(k));
+    for (final sec in sections) {
+      _sectionKeys.putIfAbsent(sec.id, () => GlobalKey());
+    }
+
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        child: Text(_metaLine(), style: const TextStyle(color: Colors.grey)),
+      ),
+      SectionChips(
+        sections: sections,
+        alphaOf: (_) => 0.25,
+        onSelect: _scrollToSection,
+        spacing: 8,
+        fontSize: 14,
+        verticalPadding: 4,
+      ),
+      Expanded(
+        child: SongBodyList(
+          sections: sections,
+          lyricsOnly: widget.config.lyricsOnly,
+          semitones: widget.config.semitones,
+          fontSize: widget.config.fontSize,
+          american: widget.config.americanNotation,
+          controller: _scrollController,
+          sectionKeys: _sectionKeys,
+        ),
+      ),
+    ]);
   }
 }

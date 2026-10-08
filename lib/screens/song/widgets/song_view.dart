@@ -1,6 +1,5 @@
-// Widgets de dibujado de la canción: chips de sección, cuerpo con letra y
-// acordes (vista normal y modo "ajustar todo"), y barra de navegación del
-// modo ajustado. Son puro render: no manejan estado propio.
+// Widgets de dibujado de la canción: chips de sección y cuerpo con letra y
+// acordes. Son puro render: no manejan estado propio.
 import 'package:flutter/material.dart';
 
 import '../../../data/chord_parser.dart';
@@ -25,11 +24,9 @@ Color sectionKindColor(SectionKind k) {
 /// su tipo; al tocarla salta a esa sección.
 class SectionChips extends StatelessWidget {
   final List<Section> sections;
-  /// Devuelve la opacidad del fondo del círculo para cada sección (para
-  /// resaltar la página activa en el modo "ajustar todo").
+  /// Devuelve la opacidad del fondo del círculo para cada sección.
   final double Function(Section sec) alphaOf;
-  /// Al tocar una sección (scroll en vista normal, salto de página en modo
-  /// "ajustar todo"). Si es null, los chips no hacen nada.
+  /// Al tocar una sección salta a ella. Si es null, los chips no hacen nada.
   final void Function(Section sec)? onSelect;
   final double spacing;
   final double fontSize;
@@ -167,82 +164,5 @@ class SongBodyList extends StatelessWidget {
       ],
       if (sections.isEmpty) const Text('Esta canción aún no tiene letra.'),
     ]);
-  }
-}
-
-/// Una columna de página en el modo "ajustar todo" (se puede dividir en dos
-/// columnas en horizontal/tablet).
-class FitPageColumn extends StatelessWidget {
-  final List<Section> sections;
-  final bool lyricsOnly;
-  final int semitones;
-  final double fontSize;
-  final bool american;
-  const FitPageColumn({super.key, required this.sections, required this.lyricsOnly, required this.semitones, required this.fontSize, this.american = true});
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (final sec in sections) ...[
-            SectionHeader(sec: sec, fontSize: 10, gap: 6, letterSpacing: 1.2),
-            const SizedBox(height: 4),
-            for (final line in sec.lines)
-              line.isEmpty
-                  ? const SizedBox(height: 6)
-                  : Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 0.5),
-                      child: SongLineView(line: line, lyricsOnly: lyricsOnly, semitones: semitones, fontSize: fontSize, chordScale: 0.8, lineHeight: 1.2, chordLineHeight: 1.0, american: american),
-                    ),
-            const SizedBox(height: 16),
-          ],
-          if (sections.isEmpty)
-            Center(child: Padding(padding: const EdgeInsets.all(32), child: Text('Esta canción aún no tiene letra.', style: TextStyle(fontSize: fontSize, color: Colors.grey)))),
-        ],
-      ),
-    );
-  }
-}
-
-/// Indicador inferior de navegación del modo "ajustar todo".
-class FitNavBar extends StatelessWidget {
-  final int fitPage;
-  final int pages;
-
-  /// Botón para salir del modo presentación (null = sin botón).
-  final VoidCallback? onExit;
-  const FitNavBar({super.key, required this.fitPage, required this.pages, this.onExit});
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.chevron_left, color: fitPage > 0 ? AppColors.primary : Colors.grey),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text('Toca los lados ◀ ▶ · Flechas / Pedal', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
-            ),
-            const SizedBox(width: 8),
-            Icon(Icons.chevron_right, color: fitPage < pages - 1 ? AppColors.primary : Colors.grey),
-            if (onExit != null) ...[
-              const SizedBox(width: 8),
-              IconButton(
-                icon: const Icon(Icons.fullscreen_exit, size: 20),
-                tooltip: 'Salir del modo presentación',
-                onPressed: onExit,
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
   }
 }

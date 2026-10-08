@@ -1,6 +1,6 @@
 // Panel lateral (drawer) de opciones de vista de la canción: acordes/letra,
-// tamaño de fuente, modo página vs ajustar-todo, compartir/exportar y
-// acciones de edición/eliminación. Mutan [config] y avisan con [onChanged].
+// tamaño de fuente, compartir/exportar y acciones de edición/eliminación.
+// Mutan [config] y avisan con [onChanged].
 // El tono se ajusta desde el selector desplegable de la barra superior.
 import 'package:flutter/material.dart';
 
@@ -8,15 +8,11 @@ import '../../../models/song.dart';
 import '../../../services/song_export.dart';
 import '../../../theme.dart';
 
-/// Estado ajustable de la vista de canción (vive en el estado de la pantalla
-/// para que los accesos directos por teclado/pedal lo lean igual que el panel).
+/// Estado ajustable de la vista de canción (vive en el estado de la pantalla).
 class SongViewConfig {
   int semitones = 0;
   double fontSize;
   bool lyricsOnly;
-  bool fitToScreen = false;
-  int fitPage = 0;
-  double fitMinFont = 14;
 
   /// true = notación americana (C, G, Am); false = latina (Do, Sol, Lam).
   bool americanNotation;
@@ -31,7 +27,6 @@ class ViewOptionsPanel extends StatelessWidget {
   final BuildContext hostContext;
   final SongViewConfig config;
   final VoidCallback onChanged;
-  final FocusNode focusNode;
   final Future<void> Function() onEdit;
   final VoidCallback onDelete;
 
@@ -41,7 +36,6 @@ class ViewOptionsPanel extends StatelessWidget {
     required this.hostContext,
     required this.config,
     required this.onChanged,
-    required this.focusNode,
     required this.onEdit,
     required this.onDelete,
   });
@@ -147,48 +141,6 @@ class ViewOptionsPanel extends StatelessWidget {
                 ),
               ]),
             ),
-          ]),
-          _panelLabel('Pantalla'),
-          _panelCard([
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-              child: Row(children: [
-                _choiceChip(context, 'Página', Icons.swipe, !config.fitToScreen, () {
-                  config.fitToScreen = false;
-                  config.fitPage = 0;
-                  onChanged();
-                }),
-                const SizedBox(width: 8),
-                _choiceChip(context, 'Ajustar todo', Icons.fit_screen, config.fitToScreen, () {
-                  config.fitToScreen = true;
-                  config.fitPage = 0;
-                  onChanged();
-                  WidgetsBinding.instance.addPostFrameCallback((_) => focusNode.requestFocus());
-                }),
-              ]),
-            ),
-            if (config.fitToScreen)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                child: Column(children: [
-                  Row(children: [
-                    const Icon(Icons.text_fields),
-                    const SizedBox(width: 8),
-                    const Expanded(child: Text('Mínimo legible')),
-                    Text('${config.fitMinFont.round()}px', style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.accent)),
-                  ]),
-                  Slider(value: config.fitMinFont, min: 10, max: 18, divisions: 8, label: config.fitMinFont.round().toString(), onChanged: (v) {
-                    config.fitMinFont = v;
-                    onChanged();
-                  }),
-                  const Text('Calcula el tamaño para que quepa toda la canción. Navega tocando los lados, con flechas o pedal.', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                ]),
-              )
-            else
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 0, 16, 10),
-                child: Text('Página: desplázate con el dedo para ver toda la canción.', style: TextStyle(color: Colors.grey, fontSize: 12)),
-              ),
           ]),
           _panelLabel('Compartir y exportar'),
           _panelCard([

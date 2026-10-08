@@ -52,24 +52,6 @@ void main() {
     expect(find.text('Eliminar'), findsOneWidget);
   });
 
-  testWidgets('el selector Ajustar todo muestra el control de mínimo legible', (tester) async {
-    tester.view.physicalSize = const Size(260, 560);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    final store = Store()..state = _stateWithSong();
-    await tester.pumpWidget(MaterialApp(theme: darkTheme(), home: SongScreen(store: store, songId: 's1')));
-    await openDrawer(tester);
-
-    // Alternar a "Ajustar todo" y verificar que aparece el slider de mínimo legible.
-    await reveal(tester, find.text('Ajustar todo'));
-    await tester.tap(find.text('Ajustar todo'));
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
-    expect(find.text('Mínimo legible'), findsOneWidget);
-  });
-
   test('songToPlainText ancla los acordes sobre su palabra', () {
     final song = Song(id: 's1', title: 'Test', key: 'C', body: 'Verso 1\n[Am]Hola [F]mundo\n[C]En tono');
     final text = songToPlainText(song);

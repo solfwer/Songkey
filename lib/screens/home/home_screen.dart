@@ -6,6 +6,7 @@ import '../../models/setlist.dart';
 import '../../models/song.dart';
 import '../../theme.dart';
 import '../song/song_screen.dart';
+import '../setlists/setlist_songs_screen.dart';
 import 'library_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -97,9 +98,7 @@ class _NextGigCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       child: InkWell(
-        onTap: setlist.songIds.isEmpty
-            ? null
-            : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongScreen(store: store, songId: setlist.songIds.first, setlistId: setlist.id))),
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SetlistSongsScreen(store: store, setlistId: setlist.id))),
         child: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(

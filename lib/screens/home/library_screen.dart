@@ -1,12 +1,21 @@
+// Biblioteca de canciones: buscador + botón "+" para añadir canciones
+// (manualmente con ChordPro, desde un PDF o desde un documento ChordPro).
+import 'dart:convert';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/chord_parser.dart';
 import '../../data/format.dart';
 import '../../data/store.dart';
 import '../../models/song.dart';
+import '../../services/pdf_import.dart';
 import '../../theme.dart';
 import '../song/song_editor_page.dart';
 import '../song/song_screen.dart';
+
+/// Formas de añadir una canción desde el menú "+".
+enum _AddOption { manual, pdf, chordpro }
 
 class LibraryScreen extends StatefulWidget {
   final Store store;
@@ -18,21 +27,48 @@ class LibraryScreen extends StatefulWidget {
 
 class _LibraryScreenState extends State<LibraryScreen> {
   String q = '';
-  String? groupId;
-  int category = 0; // 0 = Todas, 1 = Recientes
 
   List<Song> _applyFilters(List<Song> all) {
-    final filtered = all
-        .where((x) =>
-            (category != 1 || x.lastOpenedAt != null) &&
-            (groupId == null || x.groupId == groupId) &&
-            x.title.toLowerCase().contains(q.toLowerCase()))
-        .toList();
-    if (category == 1) {
-      filtered.sort((a, b) => ((b.lastOpenedAt ?? '')).compareTo(a.lastOpenedAt ?? ''));
-      return filtered.take(12).toList();
+    final f = q.trim().toLowerCase();
+    return f.isEmpty ? all : all.where((x) => x.title.toLowerCase().contains(f)).toList();
+  }
+
+  void _handleAdd(_AddOption opt) {
+    switch (opt) {
+      case _AddOption.manual:
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongEditorPage(store: widget.store)));
+      case _AddOption.pdf:
+        _importPdf();
+      case _AddOption.chordpro:
+        _importChordPro();
     }
-    return filtered;
+  }
+
+  Future<void> _importPdf() async {
+    final res = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf'], withData: true);
+    final file = res?.files.firstOrNull;
+    final bytes = file?.bytes;
+    if (file == null || bytes == null) return;
+    try {
+      final draft = await pdfToDraft(file.name, bytes);
+      if (!mounted) return;
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongEditorPage(store: widget.store, initialTitle: draft.title, initialBody: draft.body)));
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se pudo leer el PDF (¿escaneado?)')));
+      }
+    }
+  }
+
+  Future<void> _importChordPro() async {
+    final res = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['cho', 'chopro', 'chordpro', 'txt'], withData: true);
+    final file = res?.files.firstOrNull;
+    final bytes = file?.bytes;
+    if (file == null || bytes == null) return;
+    final text = utf8.decode(bytes);
+    final name = file.name.replaceAll(RegExp(r'\.[^.]+$'), '');
+    if (!mounted) return;
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongEditorPage(store: widget.store, initialTitle: name, initialBody: text)));
   }
 
   @override
@@ -53,27 +89,40 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              FilledButton.icon(
-                onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongEditorPage(store: widget.store, initialGroupId: groupId))),
-                icon: const Icon(Icons.add),
-                label: const Text('Nueva'),
+              PopupMenuButton<_AddOption>(
+                tooltip: 'Añadir canción',
+                onSelected: _handleAdd,
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: _AddOption.manual,
+                    child: ListTile(leading: Icon(Icons.edit), title: Text('Escribir a mano (ChordPro)'), contentPadding: EdgeInsets.zero, dense: true),
+                  ),
+                  const PopupMenuItem(
+                    value: _AddOption.pdf,
+                    child: ListTile(leading: Icon(Icons.picture_as_pdf), title: Text('Importar PDF'), contentPadding: EdgeInsets.zero, dense: true),
+                  ),
+                  const PopupMenuItem(
+                    value: _AddOption.chordpro,
+                    child: ListTile(leading: Icon(Icons.description), title: Text('Importar documento ChordPro'), contentPadding: EdgeInsets.zero, dense: true),
+                  ),
+                ],
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(12)),
+                    child: const Icon(Icons.add, color: Colors.white, size: 26),
+                  ),
+                ),
               ),
-            ]),
-            const SizedBox(height: 12),
-            Wrap(spacing: 8, runSpacing: 4, children: [
-              ChoiceChip(label: const Text('Todas'), selected: category == 0, onSelected: (_) => setState(() => category = 0)),
-              ChoiceChip(label: const Text('Recientes'), selected: category == 1, onSelected: (_) => setState(() => category = 1)),
-              const SizedBox(width: 4),
-              ChoiceChip(label: const Text('Todos los grupos'), selected: groupId == null, onSelected: (_) => setState(() => groupId = null)),
-              for (final g in s.groups)
-                ChoiceChip(label: Text(g.name), selected: groupId == g.id, onSelected: (_) => setState(() => groupId = g.id)),
             ]),
             const SizedBox(height: 8),
             Align(alignment: Alignment.centerRight, child: Text('${list.length} canciones', style: const TextStyle(color: Colors.grey))),
             const SizedBox(height: 8),
             Expanded(
               child: list.isEmpty
-                  ? const Center(child: Text('No hay canciones. Crea una o importa tus PDF.'))
+                  ? const Center(child: Text('No hay canciones. Toca + para crear o importar.'))
                   : ListView.separated(
                       itemCount: list.length,
                       separatorBuilder: (_, __) => const Divider(height: 1),

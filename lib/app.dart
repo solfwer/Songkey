@@ -3,9 +3,9 @@
 import 'package:flutter/material.dart';
 
 import 'data/store.dart';
+import 'screens/auth/login_screen.dart';
 import 'screens/groups/groups_screen.dart';
 import 'screens/home/home_screen.dart';
-import 'screens/home/home_splash.dart';
 import 'screens/home/library_screen.dart';
 import 'screens/settings/settings_screen.dart';
 import 'screens/setlists/setlists_screen.dart';
@@ -25,7 +25,8 @@ class MyApp extends StatelessWidget {
         themeMode: store.isDark ? ThemeMode.dark : ThemeMode.light,
         theme: lightTheme(),
         darkTheme: darkTheme(),
-        home: HomeSplash(store: store),
+        // Entrar directo a la vista Home (o al login si es la primera vez).
+        home: store.setupDone ? HomeShell(store: store) : LoginScreen(store: store),
       ),
     );
   }

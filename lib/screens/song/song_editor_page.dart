@@ -19,7 +19,12 @@ class SongEditorPage extends StatefulWidget {
   final Store store;
   final Song? song;
   final String? initialGroupId;
-  const SongEditorPage({super.key, required this.store, this.song, this.initialGroupId});
+
+  /// Borrador inicial (sin canción guardada todavía) para importaciones de PDF
+  /// o documentos ChordPro. Solo se usa si [song] es null.
+  final String? initialTitle;
+  final String? initialBody;
+  const SongEditorPage({super.key, required this.store, this.song, this.initialGroupId, this.initialTitle, this.initialBody});
 
   @override
   State<SongEditorPage> createState() => _SongEditorPageState();
@@ -38,12 +43,12 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
-    title = TextEditingController(text: widget.song?.title ?? '');
+    title = TextEditingController(text: widget.song?.title ?? widget.initialTitle ?? '');
     key = TextEditingController(text: widget.song?.key ?? 'C');
     bpm = TextEditingController(text: widget.song?.bpm?.toString() ?? '');
     style = TextEditingController(text: widget.song?.style ?? '');
     duration = TextEditingController(text: _durationLabel(widget.song?.durationSec));
-    body = TextEditingController(text: widget.song?.body ?? '');
+    body = TextEditingController(text: widget.song?.body ?? widget.initialBody ?? '');
     groupId = widget.song?.groupId ?? widget.initialGroupId;
     _tabCtrl = TabController(length: 3, vsync: this);
   }
