@@ -20,10 +20,26 @@ Color sectionKindColor(SectionKind k) {
   }
 }
 
-/// Fila horizontal de chips con las secciones de la canción.
+/// Icono por tipo de sección para los chips circulares.
+IconData sectionKindIcon(SectionKind k) {
+  switch (k) {
+    case SectionKind.intro: return Icons.play_circle_outline;
+    case SectionKind.verse: return Icons.notes;
+    case SectionKind.prechorus: return Icons.trending_up;
+    case SectionKind.chorus: return Icons.repeat;
+    case SectionKind.bridge: return Icons.alt_route;
+    case SectionKind.outro: return Icons.flag_outlined;
+    case SectionKind.ending: return Icons.stop_circle_outlined;
+    case SectionKind.other: return Icons.music_note;
+  }
+}
+
+/// Fila horizontal de chips circulares con las secciones de la canción.
+/// Cada sección es un círculo con su icono (intro, verso, coro, puente…) y
+/// una etiqueta corta debajo; al tocarla salta a esa sección.
 class SectionChips extends StatelessWidget {
   final List<Section> sections;
-  /// Devuelve la opacidad del fondo del chip para cada sección (para
+  /// Devuelve la opacidad del fondo del círculo para cada sección (para
   /// resaltar la página activa en el modo "ajustar todo").
   final double Function(Section sec) alphaOf;
   /// Al tocar una sección (scroll en vista normal, salto de página en modo
@@ -39,15 +55,31 @@ class SectionChips extends StatelessWidget {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: EdgeInsets.symmetric(horizontal: 16, vertical: verticalPadding),
-      child: Row(children: [
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         for (final sec in sections)
           Padding(
             padding: EdgeInsets.only(right: spacing),
-            child: ActionChip(
-              backgroundColor: sectionKindColor(sec.kind).withValues(alpha: alphaOf(sec)),
-              side: BorderSide(color: sectionKindColor(sec.kind).withValues(alpha: 0.7)),
-              label: Text(sec.abbr, style: TextStyle(color: sectionKindColor(sec.kind), fontWeight: FontWeight.bold, fontSize: fontSize)),
-              onPressed: onSelect == null ? null : () => onSelect!(sec),
+            child: Tooltip(
+              message: sec.label,
+              child: InkResponse(
+                radius: 28,
+                onTap: onSelect == null ? null : () => onSelect!(sec),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: sectionKindColor(sec.kind).withValues(alpha: (alphaOf(sec) + 0.22).clamp(0.0, 1.0)),
+                      border: Border.all(color: sectionKindColor(sec.kind).withValues(alpha: 0.9), width: 1.5),
+                    ),
+                    child: Icon(sectionKindIcon(sec.kind), size: 22, color: sectionKindColor(sec.kind)),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(sec.abbr, style: TextStyle(fontSize: fontSize.clamp(9.0, 13.0), fontWeight: FontWeight.bold, color: sectionKindColor(sec.kind))),
+                ]),
+              ),
             ),
           ),
       ]),

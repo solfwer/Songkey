@@ -3,7 +3,6 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../data/seed.dart';
 import '../../data/store.dart';
-import '../../services/setlist_export.dart';
 import '../../theme.dart';
 import '../home/home_splash.dart';
 import 'legal_screen.dart';
@@ -55,15 +54,6 @@ class SettingsScreen extends StatelessWidget {
           value: !prefs.defaultLyricsOnly,
           onChanged: (v) => prefs.setDefaultLyricsOnly(!v),
         ),
-        const Divider(),
-        const ListTile(title: Text('Exportar setlist', style: TextStyle(fontWeight: FontWeight.bold))),
-        for (final l in store.state.setlists)
-          ListTile(
-            title: Text(l.name),
-            subtitle: Text('${l.songIds.length} canciones'),
-            leading: const Icon(Icons.picture_as_pdf),
-            onTap: () => shareSetlistPdf(context, l, store.state.songs),
-          ),
         const Divider(),
         ListTile(
           title: const Text('Restablecer datos de ejemplo'),

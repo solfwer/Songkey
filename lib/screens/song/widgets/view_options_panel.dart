@@ -1,9 +1,9 @@
 // Panel lateral (drawer) de opciones de vista de la canción: acordes/letra,
-// tono, tamaño de fuente, modo página vs ajustar-todo, compartir/exportar y
+// tamaño de fuente, modo página vs ajustar-todo, compartir/exportar y
 // acciones de edición/eliminación. Mutan [config] y avisan con [onChanged].
+// El tono se ajusta desde el selector desplegable de la barra superior.
 import 'package:flutter/material.dart';
 
-import '../../../data/chord_parser.dart';
 import '../../../models/song.dart';
 import '../../../services/song_export.dart';
 import '../../../theme.dart';
@@ -122,34 +122,8 @@ class ViewOptionsPanel extends StatelessWidget {
               ]),
             ),
           ]),
-          _panelLabel('Tono y tamaño'),
+          _panelLabel('Tamaño de letra'),
           _panelCard([
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-              child: Column(children: [
-                Row(children: [
-                  const Icon(Icons.library_music, size: 20),
-                  const SizedBox(width: 8),
-                  const Expanded(child: Text('Tono')),
-                  Text(transposeChord(song.key, config.semitones), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.accent)),
-                  IconButton(icon: const Icon(Icons.restart_alt, size: 18), tooltip: 'Tono original', onPressed: () {
-                    config.semitones = 0;
-                    onChanged();
-                  }),
-                ]),
-                Row(children: [
-                  Expanded(child: IconButton.filledTonal(icon: const Icon(Icons.remove), tooltip: 'Bajar tono', onPressed: () {
-                    if (config.semitones > -12) config.semitones--;
-                    onChanged();
-                  })),
-                  const SizedBox(width: 8),
-                  Expanded(child: IconButton.filledTonal(icon: const Icon(Icons.add), tooltip: 'Subir tono', onPressed: () {
-                    if (config.semitones < 12) config.semitones++;
-                    onChanged();
-                  })),
-                ]),
-              ]),
-            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
               child: Column(children: [

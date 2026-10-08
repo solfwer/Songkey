@@ -11,6 +11,8 @@ void main() {
     await tester.pumpWidget(MaterialApp(theme: darkTheme(), home: Scaffold(body: SettingsScreen(store: store))));
 
     await tester.scrollUntilVisible(find.text('Aviso legal'), 100);
+    await tester.ensureVisible(find.text('Aviso legal'));
+    await tester.pumpAndSettle();
     expect(find.text('Legal'), findsOneWidget);
     await tester.tap(find.text('Aviso legal'));
     await tester.pumpAndSettle();
