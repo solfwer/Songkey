@@ -1,5 +1,5 @@
 // Editor de canción con tres pestañas:
-//  1. Texto (ChordPro): editor de texto clásico con estructura de secciones.
+//  1. Texto (ChordPro): editor de texto clásico.
 //  2. Editor visual: edición tocando las líneas.
 //  3. Estructura de la canción: cada parte es una tarjeta con su título y su
 //     letra/acordes editables debajo; se puede añadir, arrastrar para
@@ -106,9 +106,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
               const SizedBox(height: 12),
               TextField(controller: body, decoration: const InputDecoration(labelText: 'Letra con acordes', alignLabelWithHint: true), maxLines: 18, style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
               const SizedBox(height: 12),
-              const Text('Estructura de la canción: toca los iconos para reordenar, repetir, renombrar o eliminar cada parte.', style: TextStyle(color: Colors.grey, fontSize: 12)),
-              const SizedBox(height: 8),
-              _SectionsManager(controller: body),
+              const Text('Consejo: la estructura se edita en la pestaña "Estructura de la canción".', style: TextStyle(color: Colors.grey, fontSize: 12)),
               const SizedBox(height: 12),
               PdfImportButton(titleController: title, bodyController: body, onImported: () => setState(() {})),
               const SizedBox(height: 12),
@@ -177,151 +175,6 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
       return AppState(groups: s.groups, songs: songs, setlists: s.setlists);
     });
     Navigator.of(context).pop();
-  }
-}
-
-/// Gestor de estructura de la canción (pestaña Texto): lista de secciones con
-/// reordenar, duplicar, renombrar y eliminar (edición por diálogos).
-class _SectionsManager extends StatefulWidget {
-  final TextEditingController controller;
-  const _SectionsManager({required this.controller});
-
-  @override
-  State<_SectionsManager> createState() => _SectionsManagerState();
-}
-
-class _SectionsManagerState extends State<_SectionsManager> {
-  late List<_Block> blocks;
-
-  @override
-  void initState() {
-    super.initState();
-    blocks = _parseBlocks(widget.controller.text);
-  }
-
-  @override
-  void didUpdateWidget(covariant _SectionsManager oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.controller.text != oldWidget.controller.text) {
-      setState(() => blocks = _parseBlocks(widget.controller.text));
-    }
-  }
-
-  void _rebuildBody() {
-    widget.controller.text = blocks.map((b) => b.toString()).join('\n');
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Column(
-        children: [
-          const Padding(
-            padding: EdgeInsets.all(12),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text('Estructura de la canción', style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-          ),
-          if (blocks.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('Sin secciones detectadas. Escribe "Verso 1", "Coro", etc. en el editor.',
-                  style: TextStyle(color: Colors.grey)),
-            )
-          else
-            ReorderableListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: blocks.length,
-              onReorderItem: (oldIndex, newIndex) {
-                setState(() {
-                  final item = blocks.removeAt(oldIndex);
-                  blocks.insert(newIndex, item);
-                  _rebuildBody();
-                });
-              },
-              itemBuilder: (context, index) {
-                final b = blocks[index];
-                return Card(
-                  key: ValueKey(b.id),
-                  margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  child: ListTile(
-                    leading: ReorderableDragStartListener(
-                      index: index,
-                      child: const Icon(Icons.drag_handle, color: Colors.grey),
-                    ),
-                    title: Text(b.header, style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text('${b.lines.length} líneas'),
-                    trailing: Wrap(spacing: 4, children: [
-                      IconButton(
-                        tooltip: 'Repetir (duplicar)',
-                        icon: const Icon(Icons.content_copy),
-                        onPressed: () => setState(() {
-                          blocks.insert(index + 1, b.copy());
-                          _rebuildBody();
-                        }),
-                      ),
-                      IconButton(
-                        tooltip: 'Renombrar',
-                        icon: const Icon(Icons.edit_outlined),
-                        onPressed: () => _rename(b),
-                      ),
-                      IconButton(
-                        tooltip: 'Eliminar',
-                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                        onPressed: () => setState(() {
-                          blocks.removeAt(index);
-                          _rebuildBody();
-                        }),
-                      ),
-                    ]),
-                    onTap: () => _editLines(b),
-                  ),
-                );
-              },
-            ),
-        ],
-      ),
-    );
-  }
-
-  void _rename(_Block b) {
-    final c = TextEditingController(text: b.header);
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Renombrar sección'),
-        content: TextField(controller: c, autofocus: true),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
-          FilledButton(onPressed: () { setState(() { b.header = c.text.trim(); _rebuildBody(); }); Navigator.pop(context); }, child: const Text('OK')),
-        ],
-      ),
-    );
-  }
-
-  void _editLines(_Block b) {
-    final c = TextEditingController(text: b.body);
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text('Editar: ${b.header}'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: TextField(
-            controller: c,
-            maxLines: 12,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-            decoration: const InputDecoration(hintText: 'Letra y acordes…'),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
-          FilledButton(onPressed: () { setState(() { b.body = c.text.trim(); _rebuildBody(); }); Navigator.pop(context); }, child: const Text('Guardar')),
-        ],
-      ),
-    );
   }
 }
 
@@ -569,8 +422,6 @@ class _Block {
   String body;
   _Block({required this.id, required this.header, required this.body});
   _Block copy() => _Block(id: uid(), header: header, body: body);
-
-  List<String> get lines => body.split('\n').where((l) => l.trim().isNotEmpty).toList();
 
   @override
   String toString() => '$header\n$body';

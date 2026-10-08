@@ -182,29 +182,46 @@ class _Editor extends StatelessWidget {
           onChanged: (v) => update((l) => l.copyWith(venue: v)),
         ),
         const SizedBox(height: 12),
-        for (var i = 0; i < list.songIds.length; i++)
-          Builder(builder: (context) {
-            final song = s.songs.where((x) => x.id == list.songIds[i]).firstOrNull;
-            if (song == null) return const SizedBox.shrink();
-            final ready = list.readyIds.contains(song.id);
-            return Card(
-              child: ListTile(
-                leading: Text('${i + 1}.'.padLeft(3, '0'), style: const TextStyle(color: Colors.deepPurpleAccent)),
-                title: Text(song.title),
-                subtitle: Text('Tono ${song.key}'),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongScreen(store: store, songId: song.id, setlistId: list.id))),
-                trailing: Wrap(spacing: 0, children: [
-                  Checkbox(
-                    value: ready,
-                    onChanged: (_) => update((l) => l.copyWith(readyIds: l.readyIds.contains(song.id) ? l.readyIds.where((x) => x != song.id).toList() : [...l.readyIds, song.id])),
-                  ),
-                  IconButton(icon: const Icon(Icons.arrow_upward), onPressed: () => move(i, -1)),
-                  IconButton(icon: const Icon(Icons.arrow_downward), onPressed: () => move(i, 1)),
-                  IconButton(icon: const Icon(Icons.close), onPressed: () => update((l) => l.copyWith(songIds: l.songIds.asMap().entries.where((e) => e.key != i).map((e) => e.value).toList(), readyIds: l.readyIds.where((x) => x != song.id).toList()))),
-                ]),
-              ),
-            );
-          }),
+        if (list.songIds.isEmpty)
+          const Text('Sin canciones todavía. Añade una con el selector de abajo.', style: TextStyle(color: Colors.grey))
+        else ...[
+          const Text('Arrastra el icono = para cambiar el orden.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+          const SizedBox(height: 4),
+          ReorderableListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: list.songIds.length,
+            onReorderItem: (oldIndex, newIndex) => move(oldIndex, newIndex),
+            itemBuilder: (context, index) {
+              final id = list.songIds[index];
+              final song = s.songs.where((x) => x.id == id).firstOrNull;
+              if (song == null) return const SizedBox.shrink();
+              final ready = list.readyIds.contains(song.id);
+              return Card(
+                key: ValueKey(song.id),
+                child: ListTile(
+                  leading: Row(mainAxisSize: MainAxisSize.min, children: [
+                    ReorderableDragStartListener(
+                      index: index,
+                      child: const Padding(padding: EdgeInsets.all(4), child: Icon(Icons.drag_indicator, color: Colors.grey)),
+                    ),
+                    Text('${index + 1}.'.padLeft(3, '0'), style: const TextStyle(color: Colors.deepPurpleAccent)),
+                  ]),
+                  title: Text(song.title),
+                  subtitle: Text('Tono ${song.key}'),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongScreen(store: store, songId: song.id, setlistId: list.id))),
+                  trailing: Wrap(spacing: 0, children: [
+                    Checkbox(
+                      value: ready,
+                      onChanged: (_) => update((l) => l.copyWith(readyIds: l.readyIds.contains(song.id) ? l.readyIds.where((x) => x != song.id).toList() : [...l.readyIds, song.id])),
+                    ),
+                    IconButton(icon: const Icon(Icons.close), tooltip: 'Quitar del setlist', onPressed: () => update((l) => l.copyWith(songIds: l.songIds.asMap().entries.where((e) => e.key != index).map((e) => e.value).toList(), readyIds: l.readyIds.where((x) => x != song.id).toList()))),
+                  ]),
+                ),
+              );
+            },
+          ),
+        ],
         const SizedBox(height: 8),
         DropdownButton<String>(
           hint: const Text('+ Añadir canción…'),
@@ -245,12 +262,13 @@ class _Editor extends StatelessWidget {
     if (picked != null) update((l) => l.copyWith(date: picked.toIso8601String().substring(0, 10)));
   }
 
-  void move(int i, int d) {
+  /// Reordenar canciones arrastrando: [oldIndex] era la posición salida y
+  /// [newIndex] la de destino (ya ajustada por ReorderableListView).
+  void move(int oldIndex, int newIndex) {
     update((l) {
       final ids = [...l.songIds];
-      final j = i + d;
-      if (j < 0 || j >= ids.length) return l;
-      final t = ids[i]; ids[i] = ids[j]; ids[j] = t;
+      final item = ids.removeAt(oldIndex);
+      ids.insert(newIndex, item);
       return l.copyWith(songIds: ids);
     });
   }
