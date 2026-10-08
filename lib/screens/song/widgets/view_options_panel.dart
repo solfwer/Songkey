@@ -13,11 +13,14 @@ import '../../../theme.dart';
 class SongViewConfig {
   int semitones = 0;
   double fontSize;
-  bool lyricsOnly = false;
+  bool lyricsOnly;
   bool fitToScreen = false;
   int fitPage = 0;
   double fitMinFont = 14;
-  SongViewConfig({required this.fontSize});
+
+  /// true = notación americana (C, G, Am); false = latina (Do, Sol, Lam).
+  bool americanNotation;
+  SongViewConfig({required this.fontSize, this.lyricsOnly = false, this.americanNotation = true});
 }
 
 class ViewOptionsPanel extends StatelessWidget {

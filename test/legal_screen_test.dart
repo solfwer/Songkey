@@ -25,6 +25,8 @@ void main() {
     await tester.pumpWidget(MaterialApp(theme: darkTheme(), home: Scaffold(body: SettingsScreen(store: store))));
 
     await tester.scrollUntilVisible(find.text('Política de privacidad'), 100);
+    await tester.ensureVisible(find.text('Política de privacidad'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Política de privacidad'));
     await tester.pumpAndSettle();
 

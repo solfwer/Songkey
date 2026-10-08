@@ -121,7 +121,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
         IconButton(icon: const Icon(Icons.delete), onPressed: () async {
           final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(title: Text('¿Eliminar “${g.name}”? Las canciones se conservan.'), actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Eliminar'))]));
           if (ok == true) {
-            widget.store.update((st) => AppState(groups: st.groups.where((x) => x.id != g.id).toList(), songs: st.songs.map((x) => x.groupId == g.id ? Song(id: x.id, title: x.title, author: x.author, key: x.key, bpm: x.bpm, groupId: null, body: x.body) : x).toList(), setlists: st.setlists.map((l) => l.groupId == g.id ? Setlist(id: l.id, name: l.name, date: l.date, groupId: null, songIds: l.songIds, members: l.members) : l).toList()));
+            widget.store.update((st) => AppState(groups: st.groups.where((x) => x.id != g.id).toList(), songs: st.songs.map((x) => x.groupId == g.id ? Song(id: x.id, title: x.title, author: x.author, key: x.key, bpm: x.bpm, groupId: null, body: x.body, style: x.style, durationSec: x.durationSec, lastOpenedAt: x.lastOpenedAt) : x).toList(), setlists: st.setlists.map((l) => l.groupId == g.id ? Setlist(id: l.id, name: l.name, date: l.date, venue: l.venue, groupId: null, songIds: l.songIds, readyIds: l.readyIds, members: l.members) : l).toList()));
             if (mounted) Navigator.of(context).pop();
           }
         }),

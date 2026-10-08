@@ -42,6 +42,20 @@ class SettingsScreen extends StatelessWidget {
         Slider(value: prefs.defaultFontSize, min: 12, max: 34, divisions: 22, label: prefs.defaultFontSize.toInt().toString(), onChanged: (v) => prefs.setDefaultFontSize(v)),
         Center(child: Text('Vista previa:', style: TextStyle(fontSize: prefs.defaultFontSize))),
         const Divider(),
+        const ListTile(title: Text('Preferencias', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+        SwitchListTile(
+          title: const Text('Notación americana'),
+          subtitle: const Text('Acordes como C, G, Am — apaga para Do, Sol, Lam'),
+          value: prefs.americanNotation,
+          onChanged: (v) => prefs.setAmericanNotation(v),
+        ),
+        SwitchListTile(
+          title: const Text('Mostrar acordes por defecto'),
+          subtitle: const Text('Al abrir una canción: con acordes o solo la letra'),
+          value: !prefs.defaultLyricsOnly,
+          onChanged: (v) => prefs.setDefaultLyricsOnly(!v),
+        ),
+        const Divider(),
         const ListTile(title: Text('Exportar setlist', style: TextStyle(fontWeight: FontWeight.bold))),
         for (final l in store.state.setlists)
           ListTile(

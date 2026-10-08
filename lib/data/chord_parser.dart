@@ -185,11 +185,34 @@ List<Section> parseSong(String raw) {
 const _sharps = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const _flats = {'Db': 'C#', 'Eb': 'D#', 'Gb': 'F#', 'Ab': 'G#', 'Bb': 'A#', 'Cb': 'B', 'Fb': 'E'};
 
+/// Los 12 tonos (sostenidos), útiles para selectores de tonalidad.
+const twelveKeys = _sharps;
+
+/// Nombres en notación latina (Do, Re, Mi...) para cada nota, con sus
+/// alteraciones más habituales en castellano (Sib, Mib, Do#...).
+const _latinRoots = {
+  'C': 'Do', 'C#': 'Do#', 'Db': 'Reb', 'D': 'Re', 'D#': 'Re#', 'Eb': 'Mib',
+  'E': 'Mi', 'F': 'Fa', 'F#': 'Fa#', 'Gb': 'Solb', 'G': 'Sol', 'G#': 'Sol#',
+  'Ab': 'Lab', 'A': 'La', 'A#': 'La#', 'Bb': 'Sib', 'B': 'Si', 'Cb': 'Dob', 'Fb': 'Fab',
+};
+
+/// Convierte un acorde a notación latina: "G7" -> "Sol7", "Bm" -> "Sim", "F#m" -> "Fa#m".
+String chordToLatin(String chord) => chord.replaceAllMapped(
+      RegExp(r'([A-G][#b]?)'),
+      (m) => _latinRoots[m.group(1)!] ?? m.group(1)!,
+    );
+
+/// Notación de visualización de un acorde según preferencia (americana o latina).
+String notateChord(String chord, {bool american = true}) => american ? chord : chordToLatin(chord);
+
 String _shiftNote(String n, int st) {
   final idx = _sharps.indexOf(_flats[n] ?? n);
   if (idx < 0) return n;
   return _sharps[(idx + st + 120) % 12];
 }
+
+/// Escritura canónica con sostenidos: "Eb" -> "D#", "Ab" -> "G#"...
+String sharpen(String note) => _flats[note] ?? note;
 
 String transposeChord(String chord, int st) {
   if (st == 0) return chord;

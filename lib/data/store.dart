@@ -16,6 +16,12 @@ class Store extends ChangeNotifier {
   bool loggedIn = false;
   bool setupDone = false;
 
+  /// Notación de acordes: true = americana (C, G, Am), false = latina (Do, Sol, Lam).
+  bool americanNotation = true;
+
+  /// Abrir canciones solo con letra (sin acordes) por defecto.
+  bool defaultLyricsOnly = false;
+
   bool get hasAccount => username.isNotEmpty && _password.isNotEmpty;
 
   Future<void> load() async {
@@ -33,6 +39,8 @@ class Store extends ChangeNotifier {
     _password = prefs.getString('songkey-pass') ?? '';
     loggedIn = prefs.getBool('songkey-session') ?? false;
     setupDone = prefs.getBool('songkey-setup') ?? false;
+    americanNotation = prefs.getBool('songkey-american') ?? true;
+    defaultLyricsOnly = prefs.getBool('songkey-lyricsonly') ?? false;
     notifyListeners();
   }
 
@@ -98,6 +106,29 @@ class Store extends ChangeNotifier {
     profileName = v;
     SharedPreferences.getInstance().then((p) => p.setString('songkey-profile', v));
     notifyListeners();
+  }
+
+  void setAmericanNotation(bool v) {
+    americanNotation = v;
+    SharedPreferences.getInstance().then((p) => p.setBool('songkey-american', v));
+    notifyListeners();
+  }
+
+  void setDefaultLyricsOnly(bool v) {
+    defaultLyricsOnly = v;
+    SharedPreferences.getInstance().then((p) => p.setBool('songkey-lyricsonly', v));
+    notifyListeners();
+  }
+
+  /// Marca una canción como recién abierta (alimenta "Recientes" del inicio).
+  void markSongOpened(String songId, {String? at}) {
+    final stamp = at ?? DateTime.now().toIso8601String();
+    final changed = state.songs.any((x) => x.id == songId && x.lastOpenedAt != stamp);
+    if (!changed) return;
+    update((s) {
+      final songs = s.songs.map((x) => x.id == songId ? x.copyWith(lastOpenedAt: stamp) : x).toList();
+      return AppState(groups: s.groups, songs: songs, setlists: s.setlists);
+    });
   }
 
   Future<void> _persist() async {

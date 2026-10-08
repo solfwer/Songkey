@@ -5,6 +5,8 @@ import '../models/song.dart';
 /// Estado inicial de demostración: canciones de ejemplo originales + himnos
 /// tradicionales de dominio público (para un repertorio inicial legal).
 AppState seedState() {
+  final now = DateTime.now();
+  String h(int hours) => now.subtract(Duration(hours: hours)).toIso8601String();
   return AppState(
     groups: [
       Group(id: 'g1', name: 'Alabanza Dominical', color: GroupColor.primary),
@@ -12,31 +14,33 @@ AppState seedState() {
       Group(id: 'g3', name: 'Acústico noche', color: GroupColor.warm),
     ],
     songs: [
-      Song(id: 's1', title: 'Luz de la mañana', key: 'G', bpm: 72, groupId: 'g1', body: _s1),
-      Song(id: 's2', title: 'Río en calma', key: 'D', bpm: 64, groupId: 'g3', body: _s2),
-      Song(id: 's3', title: 'Somos uno', key: 'A', bpm: 118, groupId: 'g2', body: _s3),
-      Song(id: 's4', title: 'Cielo nuevo', key: 'E', bpm: 76, groupId: 'g1', body: _s4),
-      Song(id: 's5', title: 'Puertas abiertas', key: 'F', bpm: 96, groupId: 'g2', body: _s5),
-      Song(id: 's6', title: 'En tu presencia', key: 'Bm', bpm: 58, groupId: 'g3', body: _s6),
-      Song(id: 's7', title: 'Aleluya eterno', key: 'D', bpm: 110, groupId: 'g1', body: _s7),
-      Song(id: 's8', title: 'Camino seguro', key: 'C', bpm: 80, groupId: 'g3', body: _s8),
-      Song(id: 's9', title: 'Viento fresco', key: 'G', bpm: 104, groupId: 'g2', body: _s9),
+      Song(id: 's1', title: 'Luz de la mañana', key: 'G', bpm: 72, groupId: 'g1', body: _s1, style: 'Adoración', durationSec: 245, lastOpenedAt: h(2)),
+      Song(id: 's2', title: 'Río en calma', key: 'D', bpm: 64, groupId: 'g3', body: _s2, style: 'Acústico', durationSec: 268, lastOpenedAt: h(20)),
+      Song(id: 's3', title: 'Somos uno', key: 'A', bpm: 118, groupId: 'g2', body: _s3, style: 'Rock', durationSec: 210, lastOpenedAt: h(5)),
+      Song(id: 's4', title: 'Cielo nuevo', key: 'E', bpm: 76, groupId: 'g1', body: _s4, style: 'Adoración', durationSec: 232, lastOpenedAt: h(30)),
+      Song(id: 's5', title: 'Puertas abiertas', key: 'F', bpm: 96, groupId: 'g2', body: _s5, style: 'Pop', durationSec: 198, lastOpenedAt: h(50)),
+      Song(id: 's6', title: 'En tu presencia', key: 'Bm', bpm: 58, groupId: 'g3', body: _s6, style: 'Ballad', durationSec: 301, lastOpenedAt: h(26)),
+      Song(id: 's7', title: 'Aleluya eterno', key: 'D', bpm: 110, groupId: 'g1', body: _s7, style: 'Rock', durationSec: 224, lastOpenedAt: h(74)),
+      Song(id: 's8', title: 'Camino seguro', key: 'C', bpm: 80, groupId: 'g3', body: _s8, style: 'Acústico', durationSec: 256, lastOpenedAt: h(120)),
+      Song(id: 's9', title: 'Viento fresco', key: 'G', bpm: 104, groupId: 'g2', body: _s9, style: 'Pop', durationSec: 187, lastOpenedAt: h(8)),
       // Himnos tradicionales de dominio público (letras y traducciones antiguas,
       // derechos de autor expirados) para que haya repertorio inicial legal.
-      Song(id: 's10', title: 'Sublime gracia', key: 'G', bpm: 66, groupId: 'g1', body: _pd1),
-      Song(id: 's11', title: 'Santo, santo, santo', key: 'C', bpm: 78, groupId: 'g1', body: _pd2),
-      Song(id: 's12', title: 'Oh qué amigo nos es Cristo', key: 'C', bpm: 84, groupId: 'g2', body: _pd3),
-      Song(id: 's13', title: 'Noche de paz', key: 'G', bpm: 72, groupId: 'g3', body: _pd4),
-      Song(id: 's14', title: 'Cristo me ama', key: 'C', bpm: 88, groupId: 'g2', body: _pd5),
-      Song(id: 's15', title: 'Venid fieles todos', key: 'G', bpm: 100, groupId: 'g1', body: _pd6),
+      Song(id: 's10', title: 'Sublime gracia', key: 'G', bpm: 66, groupId: 'g1', body: _pd1, style: 'Himno', durationSec: 289, lastOpenedAt: h(3)),
+      Song(id: 's11', title: 'Santo, santo, santo', key: 'C', bpm: 78, groupId: 'g1', body: _pd2, style: 'Himno', durationSec: 240),
+      Song(id: 's12', title: 'Oh qué amigo nos es Cristo', key: 'C', bpm: 84, groupId: 'g2', body: _pd3, style: 'Himno', durationSec: 235),
+      Song(id: 's13', title: 'Noche de paz', key: 'G', bpm: 72, groupId: 'g3', body: _pd4, style: 'Villancico', durationSec: 205),
+      Song(id: 's14', title: 'Cristo me ama', key: 'C', bpm: 88, groupId: 'g2', body: _pd5, style: 'Himno', durationSec: 178),
+      Song(id: 's15', title: 'Venid fieles todos', key: 'G', bpm: 100, groupId: 'g1', body: _pd6, style: 'Himno', durationSec: 265),
     ],
     setlists: [
       Setlist(
         id: 'l1',
         name: 'Domingo',
-        date: DateTime.now().toIso8601String().substring(0, 10),
+        date: now.toIso8601String().substring(0, 10),
+        venue: 'Templo principal',
         groupId: 'g1',
         songIds: ['s1', 's7', 's3', 's2', 's4'],
+        readyIds: ['s1', 's7', 's3'],
         members: [
           Member(id: 'm1', name: 'María', role: 'voz', status: 'confirmado'),
           Member(id: 'm2', name: 'Jorge', role: 'guitarra', status: 'pendiente'),
@@ -45,9 +49,11 @@ AppState seedState() {
       Setlist(
         id: 'l2',
         name: 'Viernes acústico',
-        date: DateTime.now().toIso8601String().substring(0, 10),
+        date: now.add(const Duration(days: 4)).toIso8601String().substring(0, 10),
+        venue: 'Salón de ensayo',
         groupId: 'g3',
         songIds: ['s6', 's2', 's8'],
+        readyIds: ['s6'],
         members: [
           Member(id: 'm3', name: 'Lucía', role: 'voz', status: 'confirmado'),
         ],
@@ -55,9 +61,11 @@ AppState seedState() {
       Setlist(
         id: 'l3',
         name: 'Juventud',
-        date: DateTime.now().toIso8601String().substring(0, 10),
+        date: now.subtract(const Duration(days: 6)).toIso8601String().substring(0, 10),
+        venue: 'Sala B',
         groupId: 'g2',
         songIds: ['s9', 's5', 's3'],
+        readyIds: ['s9', 's5', 's3'],
         members: [],
       ),
     ],

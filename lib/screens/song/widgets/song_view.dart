@@ -26,10 +26,13 @@ class SectionChips extends StatelessWidget {
   /// Devuelve la opacidad del fondo del chip para cada sección (para
   /// resaltar la página activa en el modo "ajustar todo").
   final double Function(Section sec) alphaOf;
+  /// Al tocar una sección (scroll en vista normal, salto de página en modo
+  /// "ajustar todo"). Si es null, los chips no hacen nada.
+  final void Function(Section sec)? onSelect;
   final double spacing;
   final double fontSize;
   final double verticalPadding;
-  const SectionChips({super.key, required this.sections, required this.alphaOf, this.spacing = 8, this.fontSize = 13, this.verticalPadding = 2});
+  const SectionChips({super.key, required this.sections, required this.alphaOf, this.onSelect, this.spacing = 8, this.fontSize = 13, this.verticalPadding = 2});
 
   @override
   Widget build(BuildContext context) {
@@ -44,7 +47,7 @@ class SectionChips extends StatelessWidget {
               backgroundColor: sectionKindColor(sec.kind).withValues(alpha: alphaOf(sec)),
               side: BorderSide(color: sectionKindColor(sec.kind).withValues(alpha: 0.7)),
               label: Text(sec.abbr, style: TextStyle(color: sectionKindColor(sec.kind), fontWeight: FontWeight.bold, fontSize: fontSize)),
-              onPressed: () {},
+              onPressed: onSelect == null ? null : () => onSelect!(sec),
             ),
           ),
       ]),
@@ -62,7 +65,10 @@ class SongLineView extends StatelessWidget {
   final double chordScale;
   final double lineHeight;
   final double chordLineHeight;
-  const SongLineView({super.key, required this.line, required this.lyricsOnly, required this.semitones, required this.fontSize, this.chordScale = 0.85, this.lineHeight = 1.35, this.chordLineHeight = 1.1});
+
+  /// true = notación americana (C, G, Am); false = latina (Do, Sol, Lam).
+  final bool american;
+  const SongLineView({super.key, required this.line, required this.lyricsOnly, required this.semitones, required this.fontSize, this.chordScale = 0.85, this.lineHeight = 1.35, this.chordLineHeight = 1.1, this.american = true});
 
   @override
   Widget build(BuildContext context) {
@@ -75,7 +81,7 @@ class SongLineView extends StatelessWidget {
     return Wrap(spacing: 0, children: [
       for (final seg in line)
         Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(seg.chord != null ? transposeChord(seg.chord!, semitones) : (line.any((x) => x.chord != null) ? ' ' : ''), style: TextStyle(fontSize: fontSize * chordScale, height: chordLineHeight, fontWeight: FontWeight.bold, color: const Color(0xFF5AD1E6), fontFamily: 'monospace')),
+          Text(seg.chord != null ? notateChord(transposeChord(seg.chord!, semitones), american: american) : (line.any((x) => x.chord != null) ? ' ' : ''), style: TextStyle(fontSize: fontSize * chordScale, height: chordLineHeight, fontWeight: FontWeight.bold, color: const Color(0xFF5AD1E6), fontFamily: 'monospace')),
           Text(seg.text.isEmpty ? ' ' : seg.text, style: TextStyle(fontSize: fontSize, height: lineHeight, color: Colors.white)),
         ]),
     ]);
@@ -110,20 +116,31 @@ class SongBodyList extends StatelessWidget {
   final bool lyricsOnly;
   final int semitones;
   final double fontSize;
-  const SongBodyList({super.key, required this.sections, required this.lyricsOnly, required this.semitones, required this.fontSize});
+  final bool american;
+
+  /// Controlador de scroll (para saltar a secciones desde las chips).
+  final ScrollController? controller;
+
+  /// Claves por id de sección para calcular la posición de cada una.
+  final Map<String, GlobalKey>? sectionKeys;
+  const SongBodyList({super.key, required this.sections, required this.lyricsOnly, required this.semitones, required this.fontSize, this.american = true, this.controller, this.sectionKeys});
 
   @override
   Widget build(BuildContext context) {
-    return ListView(padding: const EdgeInsets.all(16), children: [
+    return ListView(controller: controller, padding: const EdgeInsets.all(16), children: [
       for (final sec in sections) ...[
-        SectionHeader(sec: sec),
+        Padding(
+          key: sectionKeys?[sec.id],
+          padding: EdgeInsets.zero,
+          child: SectionHeader(sec: sec),
+        ),
         const SizedBox(height: 6),
         for (final line in sec.lines)
           line.isEmpty
               ? const SizedBox(height: 10)
               : Padding(
                   padding: const EdgeInsets.symmetric(vertical: 1),
-                  child: SongLineView(line: line, lyricsOnly: lyricsOnly, semitones: semitones, fontSize: fontSize),
+                  child: SongLineView(line: line, lyricsOnly: lyricsOnly, semitones: semitones, fontSize: fontSize, american: american),
                 ),
         const SizedBox(height: 26),
       ],
@@ -139,7 +156,8 @@ class FitPageColumn extends StatelessWidget {
   final bool lyricsOnly;
   final int semitones;
   final double fontSize;
-  const FitPageColumn({super.key, required this.sections, required this.lyricsOnly, required this.semitones, required this.fontSize});
+  final bool american;
+  const FitPageColumn({super.key, required this.sections, required this.lyricsOnly, required this.semitones, required this.fontSize, this.american = true});
 
   @override
   Widget build(BuildContext context) {
@@ -156,7 +174,7 @@ class FitPageColumn extends StatelessWidget {
                   ? const SizedBox(height: 6)
                   : Padding(
                       padding: const EdgeInsets.symmetric(vertical: 0.5),
-                      child: SongLineView(line: line, lyricsOnly: lyricsOnly, semitones: semitones, fontSize: fontSize, chordScale: 0.8, lineHeight: 1.2, chordLineHeight: 1.0),
+                      child: SongLineView(line: line, lyricsOnly: lyricsOnly, semitones: semitones, fontSize: fontSize, chordScale: 0.8, lineHeight: 1.2, chordLineHeight: 1.0, american: american),
                     ),
             const SizedBox(height: 16),
           ],
@@ -172,7 +190,10 @@ class FitPageColumn extends StatelessWidget {
 class FitNavBar extends StatelessWidget {
   final int fitPage;
   final int pages;
-  const FitNavBar({super.key, required this.fitPage, required this.pages});
+
+  /// Botón para salir del modo presentación (null = sin botón).
+  final VoidCallback? onExit;
+  const FitNavBar({super.key, required this.fitPage, required this.pages, this.onExit});
 
   @override
   Widget build(BuildContext context) {
@@ -190,6 +211,14 @@ class FitNavBar extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Icon(Icons.chevron_right, color: fitPage < pages - 1 ? AppColors.primary : Colors.grey),
+            if (onExit != null) ...[
+              const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(Icons.fullscreen_exit, size: 20),
+                tooltip: 'Salir del modo presentación',
+                onPressed: onExit,
+              ),
+            ],
           ],
         ),
       ),

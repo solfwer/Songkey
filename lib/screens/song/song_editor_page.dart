@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/chord_parser.dart';
+import '../../data/format.dart';
 import '../../data/store.dart';
 import '../../models/app_state.dart';
 import '../../models/song.dart';
@@ -23,6 +24,8 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
   late final TextEditingController title;
   late final TextEditingController key;
   late final TextEditingController bpm;
+  late final TextEditingController style;
+  late final TextEditingController duration;
   late final TextEditingController body;
   String? groupId;
   late TabController _tabCtrl;
@@ -33,10 +36,17 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
     title = TextEditingController(text: widget.song?.title ?? '');
     key = TextEditingController(text: widget.song?.key ?? 'C');
     bpm = TextEditingController(text: widget.song?.bpm?.toString() ?? '');
+    style = TextEditingController(text: widget.song?.style ?? '');
+    duration = TextEditingController(text: _durationLabel(widget.song?.durationSec));
     body = TextEditingController(text: widget.song?.body ?? '');
     groupId = widget.song?.groupId ?? widget.initialGroupId;
     _tabCtrl = TabController(length: 2, vsync: this);
     _tabCtrl.addListener(_syncTabs);
+  }
+
+  static String _durationLabel(int? sec) {
+    if (sec == null || sec <= 0) return '';
+    return '${sec ~/ 60}:${(sec % 60).toString().padLeft(2, '0')}';
   }
 
   @override
@@ -89,6 +99,12 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
                 Expanded(child: TextField(controller: bpm, decoration: InputDecoration(labelText: 'BPM', suffixIcon: _TapTempoIcon(controller: bpm)), keyboardType: TextInputType.number)),
                 const SizedBox(width: 12),
                 Expanded(child: DropdownButtonFormField<String?>(initialValue: groupId, isExpanded: true, decoration: const InputDecoration(labelText: 'Grupo'), items: [null, ...groups.map((g) => g.id)].map((id) => DropdownMenuItem(value: id, child: Text(id == null ? 'Sin grupo' : groups.firstWhere((g) => g.id == id).name, overflow: TextOverflow.ellipsis))).toList(), onChanged: (v) => setState(() => groupId = v))),
+              ]),
+              const SizedBox(height: 12),
+              Row(children: [
+                Expanded(child: TextField(controller: style, decoration: const InputDecoration(labelText: 'Estilo (opcional)'))),
+                const SizedBox(width: 12),
+                Expanded(child: TextField(controller: duration, decoration: const InputDecoration(labelText: 'Duración (3:45)'), keyboardType: TextInputType.text)),
               ]),
               const SizedBox(height: 12),
               TextField(controller: body, decoration: const InputDecoration(labelText: 'Letra con acordes', alignLabelWithHint: true), maxLines: 18, style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
@@ -146,7 +162,17 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
   void save() {
     if (title.text.trim().isEmpty) return;
     final id = widget.song?.id ?? uid();
-    final song = Song(id: id, title: title.text.trim(), key: key.text.trim().isEmpty ? 'C' : key.text.trim(), bpm: int.tryParse(bpm.text), groupId: groupId, body: body.text);
+    final song = Song(
+      id: id,
+      title: title.text.trim(),
+      key: key.text.trim().isEmpty ? 'C' : key.text.trim(),
+      bpm: int.tryParse(bpm.text),
+      groupId: groupId,
+      body: body.text,
+      style: style.text.trim().isEmpty ? null : style.text.trim(),
+      durationSec: parseDuration(duration.text),
+      lastOpenedAt: widget.song?.lastOpenedAt,
+    );
     widget.store.update((s) {
       final songs = s.songs.any((x) => x.id == id) ? s.songs.map((x) => x.id == id ? song : x).toList() : [song, ...s.songs];
       return AppState(groups: s.groups, songs: songs, setlists: s.setlists);

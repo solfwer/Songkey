@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../data/format.dart';
 import '../../data/store.dart';
 import '../../models/app_state.dart';
 import '../../models/setlist.dart';
@@ -27,37 +28,28 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final s = widget.store.state;
     return AnimatedBuilder(
       animation: widget.store,
-      builder: (context, _) => Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(children: [
-          Row(children: [
-            FilledButton.icon(onPressed: create, icon: const Icon(Icons.add), label: const Text('Nuevo setlist')),
+      builder: (context, _) {
+        final s = widget.store.state;
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(children: [
+            Row(children: [
+              FilledButton.icon(onPressed: create, icon: const Icon(Icons.add), label: const Text('Nuevo setlist')),
+            ]),
+            const SizedBox(height: 12),
+            Expanded(
+              child: s.setlists.isEmpty
+                  ? const Center(child: Text('Aún no hay setlists.'))
+                  : ListView(children: [
+                      for (final l in s.setlists)
+                        _SetlistCard(setlist: l, store: widget.store),
+                    ]),
+            ),
           ]),
-          const SizedBox(height: 12),
-          Expanded(
-            child: s.setlists.isEmpty
-                ? const Center(child: Text('Aún no hay setlists.'))
-                : ListView(children: [
-                    for (final l in s.setlists)
-                      Card(
-                        child: ListTile(
-                          title: Text(l.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text('${l.date} · ${l.songIds.length} temas · ${l.members.length} invitados'),
-                          trailing: Wrap(spacing: 0, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                            IconButton(icon: const Icon(Icons.picture_as_pdf), tooltip: 'Exportar PDF', onPressed: () => shareSetlistPdf(context, l, s.songs)),
-                            IconButton(icon: const Icon(Icons.edit), onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SetlistDetailScreen(store: widget.store, setlistId: l.id)))),
-                            const Icon(Icons.chevron_right),
-                          ]),
-                          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SetlistSongsScreen(store: widget.store, setlistId: l.id))),
-                        ),
-                      ),
-                  ]),
-          ),
-        ]),
-      ),
+        );
+      },
     );
   }
 
@@ -81,6 +73,55 @@ class _SetlistsScreenState extends State<SetlistsScreen> {
       return AppState(groups: s.groups, songs: s.songs, setlists: setlists);
     });
     setState(() => currentId = id);
+    if (!mounted) return;
+    // Abrir el detalle para rellenar fecha/lugar y canciones.
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => SetlistDetailScreen(store: widget.store, setlistId: id)));
+  }
+}
+
+/// Tarjeta de setlist con fecha, lugar y barra de preparación.
+class _SetlistCard extends StatelessWidget {
+  final Setlist setlist;
+  final Store store;
+  const _SetlistCard({required this.setlist, required this.store});
+
+  @override
+  Widget build(BuildContext context) {
+    final l = setlist;
+    final s = store.state;
+    final ready = l.readyIds.where(l.songIds.contains).length;
+    final total = l.songIds.length;
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Column(children: [
+        ListTile(
+          title: Text(l.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+          subtitle: Text(
+            [
+              formatShortDate(l.date),
+              if (l.venue.isNotEmpty) l.venue,
+              '$total temas',
+              if (total > 0) '$ready listos',
+            ].join(' · '),
+          ),
+          isThreeLine: total > 0,
+          trailing: Wrap(spacing: 0, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            IconButton(icon: const Icon(Icons.picture_as_pdf), tooltip: 'Exportar PDF', onPressed: () => shareSetlistPdf(context, l, s.songs)),
+            IconButton(icon: const Icon(Icons.edit), onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SetlistDetailScreen(store: store, setlistId: l.id)))),
+            const Icon(Icons.chevron_right),
+          ]),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SetlistSongsScreen(store: store, setlistId: l.id))),
+        ),
+        if (total > 0)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(5),
+              child: LinearProgressIndicator(value: l.readyRatio, minHeight: 6, backgroundColor: Colors.grey.withValues(alpha: 0.2)),
+            ),
+          ),
+      ]),
+    );
   }
 }
 
@@ -110,7 +151,7 @@ class _Editor extends StatelessWidget {
           initialValue: list.name,
           style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
           decoration: const InputDecoration(border: InputBorder.none, isDense: true),
-          onChanged: (v) => update((l) => Setlist(id: l.id, name: v, date: l.date, groupId: l.groupId, songIds: l.songIds, members: l.members)),
+          onChanged: (v) => update((l) => l.copyWith(name: v)),
         ),
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
@@ -118,7 +159,12 @@ class _Editor extends StatelessWidget {
             value: list.groupId,
             hint: const Text('Sin grupo'),
             items: [null, ...s.groups.map((g) => g.id)].map((id) => DropdownMenuItem(value: id, child: Text(id == null ? 'Sin grupo' : s.groups.firstWhere((g) => g.id == id).name))).toList(),
-            onChanged: (v) => update((l) => Setlist(id: l.id, name: l.name, date: l.date, groupId: v, songIds: l.songIds, members: l.members)),
+            onChanged: (v) => update((l) => l.copyWith(groupId: v)),
+          ),
+          TextButton.icon(
+            icon: const Icon(Icons.calendar_month, size: 18),
+            label: Text(formatShortDate(list.date)),
+            onPressed: () => _pickDate(context),
           ),
           TextButton(
             onPressed: () async {
@@ -129,10 +175,18 @@ class _Editor extends StatelessWidget {
           ),
         ]),
         const SizedBox(height: 8),
+        TextFormField(
+          key: ValueKey(list.id + list.venue),
+          initialValue: list.venue,
+          decoration: const InputDecoration(labelText: 'Lugar / ocasión', isDense: true),
+          onChanged: (v) => update((l) => l.copyWith(venue: v)),
+        ),
+        const SizedBox(height: 12),
         for (var i = 0; i < list.songIds.length; i++)
           Builder(builder: (context) {
             final song = s.songs.where((x) => x.id == list.songIds[i]).firstOrNull;
             if (song == null) return const SizedBox.shrink();
+            final ready = list.readyIds.contains(song.id);
             return Card(
               child: ListTile(
                 leading: Text('${i + 1}.'.padLeft(3, '0'), style: const TextStyle(color: Colors.deepPurpleAccent)),
@@ -140,9 +194,13 @@ class _Editor extends StatelessWidget {
                 subtitle: Text('Tono ${song.key}'),
                 onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongScreen(store: store, songId: song.id, setlistId: list.id))),
                 trailing: Wrap(spacing: 0, children: [
+                  Checkbox(
+                    value: ready,
+                    onChanged: (_) => update((l) => l.copyWith(readyIds: l.readyIds.contains(song.id) ? l.readyIds.where((x) => x != song.id).toList() : [...l.readyIds, song.id])),
+                  ),
                   IconButton(icon: const Icon(Icons.arrow_upward), onPressed: () => move(i, -1)),
                   IconButton(icon: const Icon(Icons.arrow_downward), onPressed: () => move(i, 1)),
-                  IconButton(icon: const Icon(Icons.close), onPressed: () => update((l) => Setlist(id: l.id, name: l.name, date: l.date, groupId: l.groupId, songIds: l.songIds.asMap().entries.where((e) => e.key != i).map((e) => e.value).toList(), members: l.members))),
+                  IconButton(icon: const Icon(Icons.close), onPressed: () => update((l) => l.copyWith(songIds: l.songIds.asMap().entries.where((e) => e.key != i).map((e) => e.value).toList(), readyIds: l.readyIds.where((x) => x != song.id).toList()))),
                 ]),
               ),
             );
@@ -152,7 +210,7 @@ class _Editor extends StatelessWidget {
           hint: const Text('+ Añadir canción…'),
           value: null,
           items: s.songs.where((x) => !list.songIds.contains(x.id)).map((x) => DropdownMenuItem(value: x.id, child: Text('${x.title} (${x.key})'))).toList(),
-          onChanged: (v) { if (v != null) update((l) => Setlist(id: l.id, name: l.name, date: l.date, groupId: l.groupId, songIds: [...l.songIds, v], members: l.members)); },
+          onChanged: (v) { if (v != null) update((l) => l.copyWith(songIds: [...l.songIds, v])); },
         ),
         const Divider(),
         const Text('Banda invitada', style: TextStyle(letterSpacing: 2, color: Colors.grey)),
@@ -161,8 +219,8 @@ class _Editor extends StatelessWidget {
             leading: CircleAvatar(child: Text(m.name.isEmpty ? '?' : m.name.substring(0, 1).toUpperCase())),
             title: Text('${m.name} · ${m.role}'),
             trailing: Wrap(spacing: 0, children: [
-              TextButton(onPressed: () => update((l) => Setlist(id: l.id, name: l.name, date: l.date, groupId: l.groupId, songIds: l.songIds, members: l.members.map((x) => x.id == m.id ? Member(id: x.id, name: x.name, role: x.role, status: x.status == 'confirmado' ? 'pendiente' : 'confirmado') : x).toList())), child: Text(m.status, style: TextStyle(color: m.status == 'confirmado' ? Colors.green : Colors.orange))),
-              IconButton(icon: const Icon(Icons.close), onPressed: () => update((l) => Setlist(id: l.id, name: l.name, date: l.date, groupId: l.groupId, songIds: l.songIds, members: l.members.where((x) => x.id != m.id).toList()))),
+              TextButton(onPressed: () => update((l) => l.copyWith(members: l.members.map((x) => x.id == m.id ? Member(id: x.id, name: x.name, role: x.role, status: x.status == 'confirmado' ? 'pendiente' : 'confirmado') : x).toList())), child: Text(m.status, style: TextStyle(color: m.status == 'confirmado' ? Colors.green : Colors.orange))),
+              IconButton(icon: const Icon(Icons.close), onPressed: () => update((l) => l.copyWith(members: l.members.where((x) => x.id != m.id).toList()))),
             ]),
           ),
         Row(children: [
@@ -176,19 +234,30 @@ class _Editor extends StatelessWidget {
     );
   }
 
+  Future<void> _pickDate(BuildContext context) async {
+    final parsed = DateTime.tryParse(list.date);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: parsed ?? DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+    );
+    if (picked != null) update((l) => l.copyWith(date: picked.toIso8601String().substring(0, 10)));
+  }
+
   void move(int i, int d) {
     update((l) {
       final ids = [...l.songIds];
       final j = i + d;
       if (j < 0 || j >= ids.length) return l;
       final t = ids[i]; ids[i] = ids[j]; ids[j] = t;
-      return Setlist(id: l.id, name: l.name, date: l.date, groupId: l.groupId, songIds: ids, members: l.members);
+      return l.copyWith(songIds: ids);
     });
   }
 
   void invite() {
     if (mName.text.trim().isEmpty) return;
-    update((l) => Setlist(id: l.id, name: l.name, date: l.date, groupId: l.groupId, songIds: l.songIds, members: [...l.members, Member(id: uid(), name: mName.text.trim(), role: mRole.text.trim().isEmpty ? 'músico' : mRole.text.trim())]));
+    update((l) => l.copyWith(members: [...l.members, Member(id: uid(), name: mName.text.trim(), role: mRole.text.trim().isEmpty ? 'músico' : mRole.text.trim())]));
     mName.clear();
     mRole.clear();
   }
