@@ -276,7 +276,7 @@ class _SongScreenState extends State<SongScreen> {
           : AppBar(
               title: Text(song.title, overflow: TextOverflow.ellipsis),
               actions: [
-                _KeySelector(song: song, value: sharpen(transposeChord(song.key, config.semitones)), american: config.americanNotation, onSelected: (k) => setState(() => config.semitones = semitoneShift(song.key, k))),
+                _KeySelector(song: song, value: config.semitones == 0 ? null : sharpen(transposeChord(song.key, config.semitones)), american: config.americanNotation, onSelected: (k) => setState(() => config.semitones = semitoneShift(song.key, k))),
                 IconButton(icon: const Icon(Icons.present_to_all), tooltip: 'Modo presentación', onPressed: _togglePresentation),
                 IconButton(icon: const Icon(Icons.tune), tooltip: 'Opciones de vista', onPressed: () => _scaffoldKey.currentState?.openEndDrawer()),
               ],
@@ -412,9 +412,10 @@ class _SongScreenState extends State<SongScreen> {
 
 /// Selector desplegable de tonalidad (12 tonos) en la barra superior.
 /// [value] siempre viene con escritura de sostenidos para cuadrar con los items.
+/// Si [value] es null, se muestra la entrada "Original" (sin transponer).
 class _KeySelector extends StatelessWidget {
   final Song song;
-  final String value;
+  final String? value;
   final bool american;
   final ValueChanged<String> onSelected;
   const _KeySelector({required this.song, required this.value, required this.american, required this.onSelected});
@@ -424,13 +425,14 @@ class _KeySelector extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
+        child: DropdownButton<String?>(
           value: value,
           icon: const Icon(Icons.keyboard_arrow_down, size: 20),
-          onChanged: (k) => onSelected(k!),
+          onChanged: (k) => onSelected(k ?? song.key),
           items: [
+            const DropdownMenuItem<String?>(value: null, child: Text('Original', style: TextStyle(fontWeight: FontWeight.bold))),
             for (final k in twelveKeys)
-              DropdownMenuItem(value: k, child: Text(notateChord(k, american: american), style: const TextStyle(fontWeight: FontWeight.bold))),
+              DropdownMenuItem<String?>(value: k, child: Text(notateChord(k, american: american), style: const TextStyle(fontWeight: FontWeight.bold))),
           ],
         ),
       ),

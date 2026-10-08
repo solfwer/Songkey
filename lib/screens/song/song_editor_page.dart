@@ -1,7 +1,7 @@
 // Editor de canción con tres pestañas:
 //  1. Texto (ChordPro): editor de texto clásico con estructura de secciones.
 //  2. Editor visual: edición tocando las líneas.
-//  3. Secciones: cada parte de la canción es una tarjeta con su título y su
+//  3. Estructura de la canción: cada parte es una tarjeta con su título y su
 //     letra/acordes editables debajo; se puede añadir, arrastrar para
 //     reordenar, duplicar y eliminar.
 import 'package:flutter/material.dart';
@@ -77,7 +77,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
           tabs: const [
             Tab(icon: Icon(Icons.code), text: 'Texto (ChordPro)'),
             Tab(icon: Icon(Icons.touch_app), text: 'Editor visual'),
-            Tab(icon: Icon(Icons.list_alt), text: 'Secciones'),
+            Tab(icon: Icon(Icons.account_tree), text: 'Estructura de la canción'),
           ],
         ),
       ),
@@ -106,7 +106,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
               const SizedBox(height: 12),
               TextField(controller: body, decoration: const InputDecoration(labelText: 'Letra con acordes', alignLabelWithHint: true), maxLines: 18, style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
               const SizedBox(height: 12),
-              const Text('Secciones: toca los iconos para reordenar, repetir, renombrar o eliminar cada parte.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+              const Text('Estructura de la canción: toca los iconos para reordenar, repetir, renombrar o eliminar cada parte.', style: TextStyle(color: Colors.grey, fontSize: 12)),
               const SizedBox(height: 8),
               _SectionsManager(controller: body),
               const SizedBox(height: 12),
@@ -395,7 +395,7 @@ class _SectionsTabState extends State<_SectionsTab> {
       Expanded(
         child: ListView(padding: const EdgeInsets.all(16), children: [
           Row(children: [
-            const Text('Secciones', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const Text('Estructura de la canción', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const Spacer(),
             Text('${blocks.length}', style: const TextStyle(color: Colors.grey)),
           ]),
@@ -406,7 +406,7 @@ class _SectionsTabState extends State<_SectionsTab> {
             const Card(
               child: Padding(
                 padding: EdgeInsets.all(16),
-                child: Text('Aún no hay secciones. Pulsa "Añadir sección" o edítalas en la pestaña Texto.', style: TextStyle(color: Colors.grey)),
+                child: Text('Aún no hay estructura. Pulsa "Añadir sección" o edítala en la pestaña Texto.', style: TextStyle(color: Colors.grey)),
               ),
             )
           else
