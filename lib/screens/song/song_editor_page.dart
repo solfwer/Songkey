@@ -1,9 +1,9 @@
 // Editor de canción con tres pestañas:
 //  1. Texto (ChordPro): editor de texto clásico.
 //  2. Editor visual: edición tocando las líneas.
-//  3. Estructura de la canción: cada parte es una tarjeta con su título y su
-//     letra/acordes editables debajo; se puede añadir, arrastrar para
-//     reordenar, duplicar y eliminar.
+//  3. Estructura de la canción: solo se edita la estructura (título, orden,
+//     duplicar, eliminar, añadir); la letra y los acordes se editan en las
+//     pestañas Texto y Editor visual.
 import 'package:flutter/material.dart';
 
 import '../../data/chord_parser.dart';
@@ -178,10 +178,10 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
   }
 }
 
-/// Pestaña 3: edición por secciones. Cada sección es una tarjeta con su
-/// título y su letra/acordes editables directamente; se puede añadir,
-/// arrastrar para reordenar, duplicar y eliminar. Mantiene sincronizado el
-/// texto ChordPro completo en [controller].
+/// Pestaña 3: solo estructura de la canción. Cada sección es una tarjeta
+/// con su título editable; se puede añadir, arrastrar para reordenar,
+/// duplicar y eliminar. La letra se edita en las otras pestañas. Mantiene
+/// sincronizado el texto ChordPro completo en [controller].
 class _SectionsTab extends StatefulWidget {
   final TextEditingController controller;
   const _SectionsTab({required this.controller});
@@ -253,13 +253,13 @@ class _SectionsTabState extends State<_SectionsTab> {
             Text('${blocks.length}', style: const TextStyle(color: Colors.grey)),
           ]),
           const SizedBox(height: 4),
-          const Text('Cada tarjeta es una parte de la canción: edita el título y la letra con acordes debajo.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+          const Text('Solo estructura: renombra, reordena, duplica o elimina partes. La letra se edita en las pestañas Texto y Editor visual.', style: TextStyle(color: Colors.grey, fontSize: 12)),
           const SizedBox(height: 8),
           if (blocks.isEmpty)
             const Card(
               child: Padding(
                 padding: EdgeInsets.all(16),
-                child: Text('Aún no hay estructura. Pulsa "Añadir sección" o edítala en la pestaña Texto.', style: TextStyle(color: Colors.grey)),
+                child: Text('Aún no hay estructura. Pulsa "Añadir sección" para crear una parte; la letra se escribe en la pestaña Texto.', style: TextStyle(color: Colors.grey)),
               ),
             )
           else
@@ -301,9 +301,9 @@ class _SectionsTabState extends State<_SectionsTab> {
   }
 }
 
-/// Tarjeta de sección editable: título (arrastrable, renombrable) + texto con
-/// acordes debajo. Mantiene su propio estado para no perder el cursor al
-/// teclear.
+/// Tarjeta de sección (pestaña Estructura): solo estructura. Título editable
+/// (renombrable), arrastrar para reordenar, duplicar y eliminar. La letra y
+/// los acordes se editan en las pestañas Texto y Editor visual.
 class _SectionCard extends StatefulWidget {
   final _Block block;
   final int index;
@@ -318,19 +318,16 @@ class _SectionCard extends StatefulWidget {
 
 class _SectionCardState extends State<_SectionCard> {
   late final TextEditingController _header;
-  late final TextEditingController _body;
 
   @override
   void initState() {
     super.initState();
     _header = TextEditingController(text: widget.block.header);
-    _body = TextEditingController(text: widget.block.body);
   }
 
   @override
   void dispose() {
     _header.dispose();
-    _body.dispose();
     super.dispose();
   }
 
@@ -340,60 +337,43 @@ class _SectionCardState extends State<_SectionCard> {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(4, 4, 8, 8),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            ReorderableDragStartListener(
-              index: widget.index,
-              child: const Padding(padding: EdgeInsets.all(6), child: Icon(Icons.drag_handle, color: Colors.grey)),
+        padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
+        child: Row(children: [
+          ReorderableDragStartListener(
+            index: widget.index,
+            child: const Padding(padding: EdgeInsets.all(6), child: Icon(Icons.drag_handle, color: Colors.grey)),
+          ),
+          Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: sectionKindColor(kind).withValues(alpha: 0.25),
+              border: Border.all(color: sectionKindColor(kind).withValues(alpha: 0.8)),
             ),
-            Container(
-              width: 32,
-              height: 32,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: sectionKindColor(kind).withValues(alpha: 0.25),
-                border: Border.all(color: sectionKindColor(kind).withValues(alpha: 0.8)),
-              ),
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: Text(_abbrOf(widget.block.header), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                ),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Text(_abbrOf(widget.block.header), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: _header,
-                style: const TextStyle(fontWeight: FontWeight.bold),
-                decoration: const InputDecoration(isDense: true, border: InputBorder.none),
-                onChanged: (v) {
-                  widget.block.header = v;
-                  widget.onChanged();
-                },
-              ),
-            ),
-            IconButton(tooltip: 'Duplicar sección', icon: const Icon(Icons.content_copy, size: 20), onPressed: widget.onDuplicate),
-            IconButton(tooltip: 'Eliminar sección', icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent), onPressed: widget.onDelete),
-          ]),
-          Padding(
-            padding: const EdgeInsets.only(left: 10, right: 2),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
             child: TextField(
-              controller: _body,
-              minLines: 2,
-              maxLines: null,
-              keyboardType: TextInputType.multiline,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-              decoration: const InputDecoration(hintText: 'Letra y acordes…  ej: [Am]Hola [F]mundo', border: OutlineInputBorder()),
+              controller: _header,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+              decoration: const InputDecoration(isDense: true, border: InputBorder.none),
               onChanged: (v) {
-                widget.block.body = v;
+                widget.block.header = v;
                 widget.onChanged();
               },
             ),
           ),
+          IconButton(tooltip: 'Duplicar sección', icon: const Icon(Icons.content_copy, size: 20), onPressed: widget.onDuplicate),
+          IconButton(tooltip: 'Eliminar sección', icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent), onPressed: widget.onDelete),
         ]),
       ),
     );
