@@ -158,7 +158,7 @@ class _RecentTile extends StatelessWidget {
     return ListTile(
       dense: true,
       leading: const Icon(Icons.music_note, color: AppColors.accent),
-      title: Text(song.title, overflow: TextOverflow.ellipsis),
+      title: Text(song.title, maxLines: 3, overflow: TextOverflow.visible),
       subtitle: Text([song.key, if (song.bpm != null) '${song.bpm} BPM'].join(' · ')),
       trailing: const Icon(Icons.chevron_right, size: 20),
       onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongScreen(store: store, songId: song.id))),

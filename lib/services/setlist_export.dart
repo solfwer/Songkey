@@ -1,49 +1,138 @@
-// Exportación y compartición de setlists: PDF con la lista de temas, tonos y
-// banda invitada, reutilizado desde la vista de setlists y desde Ajustes.
+// Exportación y compartición de setlists: PDF con la portada (índice de temas,
+// tonos y banda invitada) seguida de cada canción completa — título, tono y
+// secciones con acordes y letra — lista para imprimir.
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
+import '../data/chord_parser.dart';
 import '../models/setlist.dart';
 import '../models/song.dart';
 import 'share_utils.dart';
 
-/// PDF de un setlist: nombre, fecha, temas con tono/BPM y banda invitada.
-Uint8List buildSetlistPdf(Setlist list, List<Song> songs) {
-  final doc = PdfDocument();
-  final page = doc.pages.add();
-  final bold = PdfStandardFont(PdfFontFamily.helvetica, 20, style: PdfFontStyle.bold);
-  final normal = PdfStandardFont(PdfFontFamily.helvetica, 12);
-  final semiBold = PdfStandardFont(PdfFontFamily.helvetica, 14, style: PdfFontStyle.bold);
-
-  page.graphics.drawString('Setlist: ${list.name}', bold, bounds: const Rect.fromLTWH(0, 0, 500, 40));
-  page.graphics.drawString('Fecha: ${list.date}', normal, bounds: const Rect.fromLTWH(0, 30, 500, 20));
-
-  var y = 70.0;
-  for (var i = 0; i < list.songIds.length; i++) {
-    final song = songs.where((s) => s.id == list.songIds[i]).firstOrNull;
-    if (song == null) continue;
-    final text =
-        '${i + 1}. ${song.title}  —  Tono: ${song.key}${song.bpm != null ? "  ·  ${song.bpm} BPM" : ""}';
-    page.graphics.drawString(text, normal, bounds: Rect.fromLTWH(0, y, 500, 24));
-    y += 24;
-  }
-
-  if (list.members.isNotEmpty) {
-    y += 24;
-    page.graphics.drawString('Banda invitada:', semiBold, bounds: Rect.fromLTWH(0, y, 500, 24));
-    y += 24;
-    for (final m in list.members) {
-      page.graphics.drawString('• ${m.name} (${m.role}) — ${m.status}', normal, bounds: Rect.fromLTWH(0, y, 500, 20));
-      y += 20;
+/// Dibuja [text] con saltos de línea por ancho. Devuelve el nuevo Y.
+double _drawWrapped(PdfPage page, String text, PdfFont font, double x, double y, double maxWidth, double lineGap) {
+  final words = text.split(' ');
+  var line = '';
+  for (final w in words) {
+    final trial = line.isEmpty ? w : '$line $w';
+    if (font.measureString(trial).width > maxWidth && line.isNotEmpty) {
+      page.graphics.drawString(line, font, bounds: Rect.fromLTWH(x, y, maxWidth, lineGap + 8));
+      y += lineGap;
+      line = w;
+    } else {
+      line = trial;
     }
   }
+  if (line.isNotEmpty) {
+    page.graphics.drawString(line, font, bounds: Rect.fromLTWH(x, y, maxWidth, lineGap + 8));
+    y += lineGap;
+  }
+  return y;
+}
 
-  final bytes = Uint8List.fromList(doc.saveSync());
-  doc.dispose();
-  return bytes;
+/// PDF de un setlist en su tono original: portada con índice y banda invitada
+/// + las canciones completas del setlist (acordes y letra).
+Uint8List buildSetlistPdf(Setlist list, List<Song> songs) {
+  final doc = PdfDocument();
+  try {
+    var page = doc.pages.add();
+    const margin = 40.0;
+    final maxWidth = page.size.width - margin * 2;
+
+    final titleFont = PdfStandardFont(PdfFontFamily.helvetica, 20, style: PdfFontStyle.bold);
+    final subtitleFont = PdfStandardFont(PdfFontFamily.helvetica, 12, style: PdfFontStyle.bold);
+    final songTitleFont = PdfStandardFont(PdfFontFamily.helvetica, 16, style: PdfFontStyle.bold);
+    final labelFont = PdfStandardFont(PdfFontFamily.helvetica, 12, style: PdfFontStyle.bold);
+    final chordFont = PdfStandardFont(PdfFontFamily.helvetica, 10, style: PdfFontStyle.bold);
+    final lyricFont = PdfStandardFont(PdfFontFamily.helvetica, 12);
+    final normalFont = PdfStandardFont(PdfFontFamily.helvetica, 12);
+
+    var y = 32.0;
+
+    void breakPage() {
+      page = doc.pages.add();
+      y = 32.0;
+    }
+
+    // Portada: nombre, fecha e índice de temas.
+    page.graphics.drawString('Setlist: ${list.name}', titleFont, bounds: Rect.fromLTWH(margin, y, maxWidth, 30));
+    y += 32;
+    page.graphics.drawString('Fecha: ${list.date}', subtitleFont, bounds: Rect.fromLTWH(margin, y, maxWidth, 18));
+    y += 26;
+
+    for (var i = 0; i < list.songIds.length; i++) {
+      final song = songs.where((s) => s.id == list.songIds[i]).firstOrNull;
+      if (song == null) continue;
+      final text = '${i + 1}. ${song.title}  —  Tono: ${song.key}${song.bpm != null ? '  ·  ${song.bpm} BPM' : ''}';
+      page.graphics.drawString(text, normalFont, bounds: Rect.fromLTWH(margin, y, maxWidth, 20));
+      y += 22;
+    }
+
+    if (list.members.isNotEmpty) {
+      y += 12;
+      page.graphics.drawString('Banda invitada:', subtitleFont, bounds: Rect.fromLTWH(margin, y, maxWidth, 20));
+      y += 20;
+      for (final m in list.members) {
+        page.graphics.drawString('• ${m.name} (${m.role}) — ${m.status}', normalFont, bounds: Rect.fromLTWH(margin, y, maxWidth, 18));
+        y += 18;
+      }
+    }
+
+    // Canciones completas del setlist.
+    for (var i = 0; i < list.songIds.length; i++) {
+      final song = songs.where((s) => s.id == list.songIds[i]).firstOrNull;
+      if (song == null) continue;
+      if (y > 300) breakPage(); // canción nueva en página fresca si queda poco espacio
+      y += 30;
+      page.graphics.drawString('${i + 1}. ${song.title.toUpperCase()}', songTitleFont, bounds: Rect.fromLTWH(margin, y, maxWidth, 24));
+      y += 26;
+      page.graphics.drawString(
+        'Tono: ${song.key}${song.bpm != null ? '  ·  ${song.bpm} BPM' : ''}',
+        subtitleFont,
+        bounds: Rect.fromLTWH(margin, y, maxWidth, 18),
+      );
+      y += 24;
+
+      for (final sec in parseSong(song.body)) {
+        if (y > 740) breakPage();
+        page.graphics.drawString(sec.label.toUpperCase(), labelFont, bounds: Rect.fromLTWH(margin, y, maxWidth, 18));
+        y += 20;
+        for (final line in sec.lines) {
+          if (y > 790) breakPage();
+          if (line.isEmpty) {
+            y += 10;
+            continue;
+          }
+          final hasChords = line.any((x) => x.chord != null);
+          final lyric = line.map((x) => x.text).join().trimRight();
+          if (!hasChords) {
+            y = _drawWrapped(page, lyric, lyricFont, margin, y, maxWidth, 17);
+          } else {
+            // Fila de acordes anclada a la misma columna que su sílaba.
+            final chordRow = StringBuffer();
+            var pos = 0;
+            for (final seg in line) {
+              while (chordRow.length < pos) {
+                chordRow.write(' ');
+              }
+              if (seg.chord != null) chordRow.write(seg.chord!);
+              pos += seg.text.length;
+            }
+            y = _drawWrapped(page, chordRow.toString().trimRight(), chordFont, margin, y, maxWidth, 13);
+            y = _drawWrapped(page, lyric, lyricFont, margin, y, maxWidth, 17);
+          }
+        }
+        y += 4;
+      }
+    }
+
+    return Uint8List.fromList(doc.saveSync());
+  } finally {
+    doc.dispose();
+  }
 }
 
 /// Comparte el PDF de un setlist.

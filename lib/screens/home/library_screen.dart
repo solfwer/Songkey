@@ -129,6 +129,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       itemBuilder: (context, i) {
                         final song = list[i];
                         final secs = parseSong(song.body).where((x) => x.kind != SectionKind.other).toList();
+                        // Vista compacta: solo secciones únicas (sin repeticiones).
+                        final uniqueAbbrs = secs.map((x) => x.abbr).toSet().toList();
                         final group = s.groups.where((g) => g.id == song.groupId).map((g) => g.name).cast<String?>().firstWhere((_) => true, orElse: () => null);
                         final duration = formatDuration(song.durationSec);
                         return ListTile(
@@ -145,7 +147,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               if (song.style != null && song.style!.isNotEmpty) song.style!,
                               if (song.bpm != null) '${song.bpm} BPM',
                               if (duration.isNotEmpty) duration,
-                              secs.map((x) => x.abbr).join(' · '),
+                              uniqueAbbrs.join(' · '),
                             ].join(' · '),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,

@@ -221,8 +221,11 @@ class _SectionsTabState extends State<_SectionsTab> {
   }
 
   void _rebuildBody() {
+    // Recomponer conservando el texto crudo de cada bloque (formato original,
+    // líneas en blanco incluidas): editar la estructura solo cambia los
+    // encabezados/orden, nunca reescribe la letra.
     _pushing = true;
-    widget.controller.text = blocks.map((b) => b.toString()).join('\n');
+    widget.controller.text = blocks.map((b) => b.toRaw()).join('\n');
     _pushing = false;
     setState(() {});
   }
@@ -242,7 +245,7 @@ class _SectionsTabState extends State<_SectionsTab> {
     );
     if (name == null || name.trim().isEmpty) return;
     setState(() {
-      blocks.add(_Block(id: uid(), header: name.trim(), body: ''));
+      blocks.add(_Block(id: uid(), header: name.trim()));
       _rebuildBody();
     });
   }
@@ -258,7 +261,7 @@ class _SectionsTabState extends State<_SectionsTab> {
             Text('${blocks.length}', style: const TextStyle(color: Colors.grey)),
           ]),
           const SizedBox(height: 4),
-          const Text('Solo estructura: renombra, reordena, duplica o elimina partes. La letra se edita en las pestañas Texto y Editor visual.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+          const Text('Estructura: renombra, reordena, duplica o elimina partes. Renombrar solo cambia el encabezado; la letra y su formato se conservan tal cual (se editan en las pestañas Texto y Editor visual).', style: TextStyle(color: Colors.grey, fontSize: 12)),
           const SizedBox(height: 8),
           if (blocks.isEmpty)
             const Card(
@@ -370,7 +373,12 @@ class _SectionCardState extends State<_SectionCard> {
             child: TextField(
               controller: _header,
               style: const TextStyle(fontWeight: FontWeight.bold),
-              decoration: const InputDecoration(isDense: true, border: InputBorder.none),
+              decoration: InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                hintText: widget.block.header.isEmpty ? 'Texto inicial (sin encabezado)' : null,
+                hintStyle: const TextStyle(fontWeight: FontWeight.normal, color: Colors.grey, fontStyle: FontStyle.italic),
+              ),
               onChanged: (v) {
                 widget.block.header = v;
                 widget.onChanged();
@@ -403,13 +411,24 @@ String _abbrOf(String header) {
 
 class _Block {
   final String id;
-  String header;
-  String body;
-  _Block({required this.id, required this.header, required this.body});
-  _Block copy() => _Block(id: uid(), header: header, body: body);
 
-  @override
-  String toString() => '$header\n$body';
+  /// Encabezado (primera línea del bloque). Vacío si el texto inicial no
+  /// tiene encabezado (se conserva tal cual, sin inventar un "Intro").
+  String header;
+
+  /// Líneas que siguen al encabezado, exactamente como se escribieron
+  /// (incluye las líneas en blanco entre secciones).
+  final List<String> content;
+  _Block({required this.id, required this.header, List<String>? content}) : content = content ?? [];
+
+  /// Copia completa (duplicar sección = encabezado + letra).
+  _Block copy() => _Block(id: uid(), header: header, content: [...content]);
+
+  /// Texto crudo del bloque conservando el formato original.
+  String toRaw() => [
+        if (header.isNotEmpty) header,
+        ...content,
+      ].join('\n');
 }
 
 List<_Block> _parseBlocks(String text) {
@@ -418,20 +437,17 @@ List<_Block> _parseBlocks(String text) {
   _Block? cur;
   for (final line in lines) {
     if (isSectionHeader(line)) {
-      if (cur != null) blocks.add(cur);
-      cur = _Block(id: uid(), header: line.trim(), body: '');
+      cur = _Block(id: uid(), header: line.trim());
+      blocks.add(cur);
     } else if (cur != null) {
-      cur.body = '${cur.body.isEmpty ? '' : '\n'}$line';
+      cur.content.add(line);
     } else if (line.trim().isNotEmpty) {
-      // Líneas antes del primer encabezado -> crear bloque "Intro"
-      if (blocks.isEmpty || blocks.last.header != 'Intro') {
-        cur = _Block(id: uid(), header: 'Intro', body: line);
-      } else {
-        cur!.body = '${cur.body}\n$line';
-      }
+      // Líneas antes del primer encabezado: bloque sin encabezado, se
+      // conserva tal cual.
+      cur = _Block(id: uid(), header: '', content: [line]);
+      blocks.add(cur);
     }
   }
-  if (cur != null) blocks.add(cur);
   return blocks;
 }
 

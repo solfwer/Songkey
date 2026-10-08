@@ -104,7 +104,7 @@ class _SongScreenState extends State<SongScreen> {
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
-        title: Text(displayed.title, overflow: TextOverflow.ellipsis),
+        title: Text(displayed.title, maxLines: 2, overflow: TextOverflow.visible, style: const TextStyle(fontSize: 17)),
         actions: [
           _KeySelector(song: displayed, value: config.semitones == 0 ? null : sharpen(transposeChord(displayed.key, config.semitones)), american: config.americanNotation, onSelected: (k) => setState(() => config.semitones = semitoneShift(displayed.key, k))),
           IconButton(icon: const Icon(Icons.tune), tooltip: 'Opciones de vista', onPressed: () => _scaffoldKey.currentState?.openEndDrawer()),
