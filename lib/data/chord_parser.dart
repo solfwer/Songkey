@@ -125,9 +125,6 @@ SongLine parseInline(String line) {
     final start = matches[i].end;
     final end = i + 1 < matches.length ? matches[i + 1].start : line.length;
     var t = line.substring(start, end);
-    if (t.isNotEmpty && !t.startsWith(' ') && !t.startsWith('\t') && !t.startsWith('\n') && !t.startsWith('\r')) {
-      t = ' $t';
-    }
     segs.add(Segment(chord: chord, text: t));
   }
   return segs;
