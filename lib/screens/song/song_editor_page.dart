@@ -52,7 +52,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
     body = TextEditingController(text: widget.song?.body ?? widget.initialBody ?? '');
     groupId = widget.song?.groupId ?? widget.initialGroupId;
     _structure = widget.song?.structure?.toList();
-    _tabCtrl = TabController(length: 3, vsync: this);
+    _tabCtrl = TabController(length: 4, vsync: this);
   }
 
   static String _durationLabel(int? sec) {
@@ -82,6 +82,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
         bottom: TabBar(
           controller: _tabCtrl,
           tabs: const [
+            Tab(icon: Icon(Icons.info_outline), text: 'Datos'),
             Tab(icon: Icon(Icons.code), text: 'Texto (ChordPro)'),
             Tab(icon: Icon(Icons.touch_app), text: 'Editor visual'),
             Tab(icon: Icon(Icons.account_tree), text: 'Estructura de la canción'),
@@ -91,7 +92,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
       body: TabBarView(
         controller: _tabCtrl,
         children: [
-          // Pestaña 1: editor de texto clásico
+          // Pestaña 1: Datos de la canción
           SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -110,35 +111,24 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
                 const SizedBox(width: 12),
                 Expanded(child: TextField(controller: duration, decoration: const InputDecoration(labelText: 'Duración (3:45)'), keyboardType: TextInputType.text)),
               ]),
-              const SizedBox(height: 12),
-              TextField(controller: body, decoration: const InputDecoration(labelText: 'Letra con acordes', alignLabelWithHint: true), maxLines: 18, style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
-              const SizedBox(height: 12),
-              const Text('Consejo: la estructura se edita en la pestaña "Estructura de la canción".', style: TextStyle(color: Colors.grey, fontSize: 12)),
-              const SizedBox(height: 12),
+              const SizedBox(height: 24),
               PdfImportButton(titleController: title, bodyController: body, onImported: () => setState(() {})),
               const SizedBox(height: 12),
               FilledButton(onPressed: save, child: const Text('Guardar')),
             ]),
           ),
-          // Pestaña 2: editor visual
+          // Pestaña 2: Texto ChordPro (solo cuerpo)
+          SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              TextField(controller: body, decoration: const InputDecoration(labelText: 'Letra con acordes (ChordPro)', alignLabelWithHint: true), maxLines: 20, style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
+              const SizedBox(height: 12),
+              FilledButton(onPressed: save, child: const Text('Guardar')),
+            ]),
+          ),
+          // Pestaña 3: editor visual
           Column(
             children: [
-              // Cabecera común (título, tono, BPM, grupo) - compacta
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  TextField(controller: title, decoration: const InputDecoration(labelText: 'Título', isDense: true)),
-                  const SizedBox(height: 8),
-                  Row(children: [
-                    Expanded(child: TextField(controller: key, decoration: const InputDecoration(labelText: 'Tono', isDense: true))),
-                    const SizedBox(width: 8),
-                    Expanded(child: TextField(controller: bpm, decoration: InputDecoration(labelText: 'BPM', isDense: true, suffixIcon: _TapTempoIcon(controller: bpm)), keyboardType: TextInputType.number)),
-                    const SizedBox(width: 8),
-                    Expanded(child: DropdownButtonFormField<String?>(initialValue: groupId, isExpanded: true, decoration: const InputDecoration(labelText: 'Grupo', isDense: true), items: [null, ...groups.map((g) => g.id)].map((id) => DropdownMenuItem(value: id, child: Text(id == null ? 'Sin grupo' : groups.firstWhere((g) => g.id == id).name, overflow: TextOverflow.ellipsis))).toList(), onChanged: (v) => setState(() => groupId = v))),
-                  ]),
-                ]),
-              ),
-              const Divider(height: 1),
               Expanded(
                 child: VisualChordEditor(
                   initialBody: body.text,
@@ -146,7 +136,6 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
                   onChanged: _onVisualChanged,
                 ),
               ),
-              // Botón guardar fijo abajo
               SafeArea(
                 top: false,
                 child: Padding(
@@ -156,7 +145,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
               ),
             ],
           ),
-          // Pestaña 3: mapa de toque de la canción
+          // Pestaña 4: mapa de toque de la canción
           _SectionsTab(controller: body, initialStructure: _structure, onStructureChanged: (v) => _structure = v),
         ],
       ),
