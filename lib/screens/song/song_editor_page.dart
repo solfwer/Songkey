@@ -34,6 +34,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
   late final TextEditingController title;
   late final TextEditingController key;
   late final TextEditingController bpm;
+  late final TextEditingController author;
   late final TextEditingController style;
   late final TextEditingController duration;
   late final TextEditingController body;
@@ -47,6 +48,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
     title = TextEditingController(text: widget.song?.title ?? widget.initialTitle ?? '');
     key = TextEditingController(text: widget.song?.key ?? 'C');
     bpm = TextEditingController(text: widget.song?.bpm?.toString() ?? '');
+    author = TextEditingController(text: widget.song?.author ?? '');
     style = TextEditingController(text: widget.song?.style ?? '');
     duration = TextEditingController(text: _durationLabel(widget.song?.durationSec));
     body = TextEditingController(text: widget.song?.body ?? widget.initialBody ?? '');
@@ -63,7 +65,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
   @override
   void dispose() {
     _tabCtrl.dispose();
-    for (final c in [title, key, bpm, style, duration, body]) {
+    for (final c in [title, key, bpm, author, style, duration, body]) {
       c.dispose();
     }
     super.dispose();
@@ -97,6 +99,8 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
             padding: const EdgeInsets.all(16),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               TextField(controller: title, decoration: const InputDecoration(labelText: 'Título')),
+              const SizedBox(height: 12),
+              TextField(controller: author, decoration: const InputDecoration(labelText: 'Autor (opcional)')),
               const SizedBox(height: 12),
               Row(children: [
                 Expanded(child: TextField(controller: key, decoration: const InputDecoration(labelText: 'Tono'))),
@@ -158,6 +162,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
     final song = Song(
       id: id,
       title: title.text.trim(),
+      author: author.text.trim().isEmpty ? null : author.text.trim(),
       key: key.text.trim().isEmpty ? 'C' : key.text.trim(),
       bpm: int.tryParse(bpm.text),
       groupId: groupId,
