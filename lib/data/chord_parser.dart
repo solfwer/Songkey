@@ -31,7 +31,7 @@ String _deaccent(String s) => s
     .replaceAll('ñ', 'n');
 
 final _header = RegExp(
-  r'^\s*[[{(]?\s*(coro|chorus|estribillo|pre-?coro|pre-?chorus|verso|verse|estrofa|puente|bridge|intro|outro|final|tag|interludio|instrumental|transicion)\s*(\d*)\s*[\]})]?\s*:?\s*$',
+  r'^\s*[[{(]?\s*(coro|chorus|estribillo|pre-?coro|pre-?chorus|verso|verse|estrofa|puente|bridge|intro|outro|final|tag|interludio|instrumental|transicion|introduccion|presentacion)\s*(\d*)\s*[\]})]?\s*:?\s*$',
 );
 
 final _chord = RegExp(
@@ -85,7 +85,7 @@ bool isChordLine(String line) {
   if (['puente', 'bridge'].contains(w)) {
     return (kind: SectionKind.bridge, abbr: 'P$n', label: 'Puente $n');
   }
-  if (w == 'intro') return (kind: SectionKind.intro, abbr: 'I', label: 'Intro');
+  if (w == 'intro' || w == 'introduccion' || w == 'presentacion') return (kind: SectionKind.intro, abbr: 'I', label: 'Intro');
   if (w == 'outro') return (kind: SectionKind.outro, abbr: 'O', label: 'Outro');
   if (w == 'final' || w == 'tag') return (kind: SectionKind.ending, abbr: 'F', label: 'Final');
   if (w == 'transicion') return (kind: SectionKind.other, abbr: 'T', label: 'Transición ${n.isEmpty ? "" : n}'.trim());
@@ -124,7 +124,11 @@ SongLine parseInline(String line) {
     final chord = matches[i].group(1)!;
     final start = matches[i].end;
     final end = i + 1 < matches.length ? matches[i + 1].start : line.length;
-    segs.add(Segment(chord: chord, text: line.substring(start, end)));
+    var t = line.substring(start, end);
+    if (t.isNotEmpty && !t.startsWith(' ') && !t.startsWith('\t') && !t.startsWith('\n') && !t.startsWith('\r')) {
+      t = ' $t';
+    }
+    segs.add(Segment(chord: chord, text: t));
   }
   return segs;
 }

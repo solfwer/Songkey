@@ -42,7 +42,7 @@ String _deaccent(String s) => s
     .replaceAll('Ñ', 'N');
 
 final _headerRe = RegExp(
-  r'^\s*[\[\(\{]?\s*(INTRODUCCION|INTRO|VERSO|ESTROFA|CORO|ESTRIBILLO|PRECORO|PRE-?CORO|PUENTE|BRIDGE|FINAL|TAG|OUTRO|INTERLUDIO|INSTRUMENTAL|TRANSICION)\s*(\d*)\s*[\]\)\}]?\s*:?\s*(.*)$',
+  r'^\s*[\[\(\{]?\s*(INTRODUCCION|INTRODUCCIÓN|INTRO|VERSO|ESTROFA|CORO|ESTRIBILLO|PRECORO|PRE-?CORO|PUENTE|BRIDGE|FINAL|TAG|OUTRO|INTERLUDIO|INSTRUMENTAL|TRANSICION|PRESENTACION)\s*(\d*)\s*[\]\)\}]?\s*:?\s*(.*)$',
 );
 
 ({String label, String rest})? _matchHeader(String line) {
