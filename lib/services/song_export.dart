@@ -19,7 +19,7 @@ String songToPlainText(Song song, {int semitones = 0, bool lyricsOnly = false}) 
   buf.writeln('-' * 8);
   buf.writeln();
 
-  for (final sec in parseSong(song.body)) {
+  for (final sec in sectionsInOrder(song.body, song.structure)) {
     buf.writeln(sec.label.toUpperCase());
     for (final line in sec.lines) {
       if (line.isEmpty) {
@@ -100,7 +100,7 @@ Uint8List buildSongPdf(Song song, {int semitones = 0, bool lyricsOnly = false}) 
     );
     y += 26;
 
-    for (final sec in parseSong(song.body)) {
+    for (final sec in sectionsInOrder(song.body, song.structure)) {
       if (y > 780) breakPage();
       page.graphics.drawString(sec.label.toUpperCase(), labelFont, bounds: Rect.fromLTWH(margin, y, maxWidth, 18));
       y += 20;

@@ -38,6 +38,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
   late final TextEditingController duration;
   late final TextEditingController body;
   String? groupId;
+  List<String>? _structure;
   late TabController _tabCtrl;
 
   @override
@@ -50,6 +51,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
     duration = TextEditingController(text: _durationLabel(widget.song?.durationSec));
     body = TextEditingController(text: widget.song?.body ?? widget.initialBody ?? '');
     groupId = widget.song?.groupId ?? widget.initialGroupId;
+    _structure = widget.song?.structure?.toList();
     _tabCtrl = TabController(length: 3, vsync: this);
   }
 
@@ -154,8 +156,8 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
               ),
             ],
           ),
-          // Pestaña 3: edición por secciones
-          _SectionsTab(controller: body),
+          // Pestaña 3: mapa de toque de la canción
+          _SectionsTab(controller: body, initialStructure: _structure, onStructureChanged: (v) => _structure = v),
         ],
       ),
     );
@@ -174,6 +176,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
       style: style.text.trim().isEmpty ? null : style.text.trim(),
       durationSec: parseDuration(duration.text),
       lastOpenedAt: widget.song?.lastOpenedAt,
+      structure: _structure,
     );
     widget.store.update((s) {
       final songs = s.songs.any((x) => x.id == id) ? s.songs.map((x) => x.id == id ? song : x).toList() : [song, ...s.songs];
@@ -183,13 +186,16 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
   }
 }
 
-/// Pestaña 3: solo estructura de la canción. Cada sección es una tarjeta
-/// con su título editable; se puede añadir, arrastrar para reordenar,
-/// duplicar y eliminar. La letra se edita en las otras pestañas. Mantiene
-/// sincronizado el texto ChordPro completo en [controller].
+/// Pestaña 3: el "mapa" de la canción (orden de toque). Cada entrada señala
+/// una sección del cuerpo y puede repetirse SIN duplicar su letra: el orden se
+/// guarda aparte ([Song.structure]). Renombrar solo cambia el encabezado;
+/// añadir/eliminar secciones sí reescribe el cuerpo cuando hace falta,
+/// conservando siempre el formato original.
 class _SectionsTab extends StatefulWidget {
   final TextEditingController controller;
-  const _SectionsTab({required this.controller});
+  final List<String>? initialStructure;
+  final ValueChanged<List<String>?> onStructureChanged;
+  const _SectionsTab({required this.controller, required this.initialStructure, required this.onStructureChanged});
 
   @override
   State<_SectionsTab> createState() => _SectionsTabState();
@@ -197,12 +203,18 @@ class _SectionsTab extends StatefulWidget {
 
 class _SectionsTabState extends State<_SectionsTab> {
   late List<_Block> blocks;
+  List<String>? _map;
+  final List<String> _entryIds = [];
   bool _pushing = false;
 
   @override
   void initState() {
     super.initState();
     blocks = _parseBlocks(widget.controller.text);
+    if (widget.initialStructure != null) {
+      _map = List<String>.of(widget.initialStructure!);
+    }
+    _syncIds(_activeMap().length);
     widget.controller.addListener(_onBodyChanged);
   }
 
@@ -220,10 +232,34 @@ class _SectionsTabState extends State<_SectionsTab> {
     setState(() => blocks = _parseBlocks(widget.controller.text));
   }
 
+  /// Mapa activo: el editado por el usuario, o el orden del cuerpo tal cual
+  /// si nunca se tocó la estructura de esta canción.
+  List<String> _activeMap() => _map ?? blocks.map((b) => b.header).toList();
+
+  /// Primera edición sobre una canción sin estructura: fija el mapa al orden
+  /// actual del cuerpo. Desde entonces el orden vive en [Song.structure] y
+  /// repetir/reordenar ya no reescribe la letra.
+  void _ensureMap() {
+    if (_map == null) {
+      _map = blocks.map((b) => b.header).toList();
+      widget.onStructureChanged(List<String>.of(_map!));
+    }
+  }
+
+  void _pushStructure() => widget.onStructureChanged(List<String>.of(_map!));
+
+  /// Mantiene ids estables por entrada para que las tarjetas conserven su
+  /// estado (su campo de texto) al reordenar el mapa.
+  void _syncIds(int n) {
+    if (_entryIds.length > n) _entryIds.removeRange(n, _entryIds.length);
+    while (_entryIds.length < n) {
+      _entryIds.add(uid());
+    }
+  }
+
+  /// Solo se reescribe el texto cuando cambian los bloques (añadir, renombrar
+  /// o eliminar una sección entera); conserva el texto crudo y el formato.
   void _rebuildBody() {
-    // Recomponer conservando el texto crudo de cada bloque (formato original,
-    // líneas en blanco incluidas): editar la estructura solo cambia los
-    // encabezados/orden, nunca reescribe la letra.
     _pushing = true;
     widget.controller.text = blocks.map((b) => b.toRaw()).join('\n');
     _pushing = false;
@@ -244,58 +280,102 @@ class _SectionsTabState extends State<_SectionsTab> {
       ),
     );
     if (name == null || name.trim().isEmpty) return;
+    _ensureMap();
     setState(() {
       blocks.add(_Block(id: uid(), header: name.trim()));
+      _map!.add(name.trim());
+      _entryIds.add(uid());
+      _pushStructure();
       _rebuildBody();
     });
   }
 
+  /// Renombra la sección entera (todas sus apariciones en el mapa y el
+  /// encabezado del cuerpo; la letra no se toca).
+  void _rename(String oldH, String newH) {
+    final trimmed = newH.trim();
+    if (trimmed.isEmpty || trimmed == oldH) return;
+    _ensureMap();
+    setState(() {
+      _map = _map!.map((h) => h == oldH ? trimmed : h).toList();
+      for (final b in blocks) {
+        if (b.header == oldH) b.header = trimmed;
+      }
+      _pushStructure();
+      _rebuildBody();
+    });
+  }
+
+  /// Nº de líneas de letra de la sección (para identificar la tarjeta).
+  String? _linesHint(String header) {
+    final b = blocks.where((x) => x.header == header).firstOrNull;
+    if (b == null) return null;
+    final n = b.content.where((l) => l.trim().isNotEmpty).length;
+    return n == 0 ? 'Sin letra aún' : '$n líneas de letra';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final map = _activeMap();
+    _syncIds(map.length);
     return Column(children: [
       Expanded(
         child: ListView(padding: const EdgeInsets.all(16), children: [
           Row(children: [
-            const Text('Estructura de la canción', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const Text('Orden de toque', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const Spacer(),
-            Text('${blocks.length}', style: const TextStyle(color: Colors.grey)),
+            Text(map.isEmpty ? '0 partes' : '${map.length} partes', style: const TextStyle(color: Colors.grey)),
           ]),
           const SizedBox(height: 4),
-          const Text('Estructura: renombra, reordena, duplica o elimina partes. Renombrar solo cambia el encabezado; la letra y su formato se conservan tal cual (se editan en las pestañas Texto y Editor visual).', style: TextStyle(color: Colors.grey, fontSize: 12)),
+          const Text('Es el mapa de lo que suena, en orden y con repeticiones. Repetir añade la sección al mapa SIN copiar su letra; renombrar solo cambia el encabezado. La letra se edita en las pestañas Texto y Editor visual.', style: TextStyle(color: Colors.grey, fontSize: 12)),
           const SizedBox(height: 8),
-          if (blocks.isEmpty)
+          if (map.isEmpty)
             const Card(
               child: Padding(
                 padding: EdgeInsets.all(16),
-                child: Text('Aún no hay estructura. Pulsa "Añadir sección" para crear una parte; la letra se escribe en la pestaña Texto.', style: TextStyle(color: Colors.grey)),
+                child: Text('Aún no hay orden de toque. Pulsa "Añadir sección" para crear una parte; la letra se escribe en la pestaña Texto.', style: TextStyle(color: Colors.grey)),
               ),
             )
           else
             ReorderableListView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              itemCount: blocks.length,
+              itemCount: map.length,
               onReorderItem: (oldIndex, newIndex) {
                 setState(() {
-                  final item = blocks.removeAt(oldIndex);
-                  blocks.insert(newIndex, item);
-                  _rebuildBody();
+                  _ensureMap();
+                  final item = _map!.removeAt(oldIndex);
+                  _map!.insert(newIndex, item);
+                  final id = _entryIds.removeAt(oldIndex);
+                  _entryIds.insert(newIndex, id);
+                  _pushStructure();
                 });
               },
               itemBuilder: (context, index) {
-                final b = blocks[index];
+                final header = map[index];
                 return _SectionCard(
-                  key: ValueKey(b.id),
-                  block: b,
+                  key: ValueKey(_entryIds[index]),
+                  header: header,
                   index: index,
-                  onChanged: _rebuildBody,
+                  linesHint: _linesHint(header),
+                  onRename: (v) => _rename(header, v),
                   onDuplicate: () => setState(() {
-                    blocks.insert(index + 1, b.copy());
-                    _rebuildBody();
+                    _ensureMap();
+                    _map!.insert(index + 1, header);
+                    _entryIds.insert(index + 1, uid());
+                    _pushStructure();
                   }),
                   onDelete: () => setState(() {
-                    blocks.removeAt(index);
-                    _rebuildBody();
+                    _ensureMap();
+                    final removed = _map!.removeAt(index);
+                    _entryIds.removeAt(index);
+                    _pushStructure();
+                    // Si era la única aparición, se elimina también la sección
+                    // (y su letra) del cuerpo, conservando el formato.
+                    if (!_map!.contains(removed)) {
+                      blocks.removeWhere((b) => b.header == removed);
+                      _rebuildBody();
+                    }
                   }),
                 );
               },
@@ -309,16 +389,16 @@ class _SectionsTabState extends State<_SectionsTab> {
   }
 }
 
-/// Tarjeta de sección (pestaña Estructura): solo estructura. Título editable
-/// (renombrable), arrastrar para reordenar, duplicar y eliminar. La letra y
-/// los acordes se editan en las pestañas Texto y Editor visual.
+/// Tarjeta de posición en el orden de toque: solo estructura. Nombre editable
+/// (renombra la sección entera), arrastrar para reordenar, repetir y eliminar.
 class _SectionCard extends StatefulWidget {
-  final _Block block;
+  final String header;
   final int index;
-  final VoidCallback onChanged;
+  final String? linesHint;
+  final ValueChanged<String> onRename;
   final VoidCallback onDuplicate;
   final VoidCallback onDelete;
-  const _SectionCard({super.key, required this.block, required this.index, required this.onChanged, required this.onDuplicate, required this.onDelete});
+  const _SectionCard({super.key, required this.header, required this.index, this.linesHint, required this.onRename, required this.onDuplicate, required this.onDelete});
 
   @override
   State<_SectionCard> createState() => _SectionCardState();
@@ -330,7 +410,7 @@ class _SectionCardState extends State<_SectionCard> {
   @override
   void initState() {
     super.initState();
-    _header = TextEditingController(text: widget.block.header);
+    _header = TextEditingController(text: widget.header);
   }
 
   @override
@@ -341,7 +421,7 @@ class _SectionCardState extends State<_SectionCard> {
 
   @override
   Widget build(BuildContext context) {
-    final kind = _kindOf(widget.block.header);
+    final kind = _kindOf(widget.header);
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6),
       child: Padding(
@@ -364,29 +444,30 @@ class _SectionCardState extends State<_SectionCard> {
               fit: BoxFit.scaleDown,
               child: Padding(
                 padding: const EdgeInsets.all(4),
-                child: Text(_abbrOf(widget.block.header), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                child: Text(_abbrOf(widget.header), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
               ),
             ),
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: TextField(
-              controller: _header,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-              decoration: InputDecoration(
-                isDense: true,
-                border: InputBorder.none,
-                hintText: widget.block.header.isEmpty ? 'Texto inicial (sin encabezado)' : null,
-                hintStyle: const TextStyle(fontWeight: FontWeight.normal, color: Colors.grey, fontStyle: FontStyle.italic),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              TextField(
+                controller: _header,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+                decoration: InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  hintText: widget.header.isEmpty ? 'Texto inicial (sin encabezado)' : null,
+                  hintStyle: const TextStyle(fontWeight: FontWeight.normal, color: Colors.grey, fontStyle: FontStyle.italic),
+                ),
+                onChanged: widget.onRename,
               ),
-              onChanged: (v) {
-                widget.block.header = v;
-                widget.onChanged();
-              },
-            ),
+              if (widget.linesHint != null)
+                Text(widget.linesHint!, style: const TextStyle(color: Colors.grey, fontSize: 11)),
+            ]),
           ),
-          IconButton(tooltip: 'Duplicar sección', icon: const Icon(Icons.content_copy, size: 20), onPressed: widget.onDuplicate),
-          IconButton(tooltip: 'Eliminar sección', icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent), onPressed: widget.onDelete),
+          IconButton(tooltip: 'Repetir esta sección', icon: const Icon(Icons.content_copy, size: 20), onPressed: widget.onDuplicate),
+          IconButton(tooltip: 'Eliminar del orden', icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent), onPressed: widget.onDelete),
         ]),
       ),
     );
@@ -420,9 +501,6 @@ class _Block {
   /// (incluye las líneas en blanco entre secciones).
   final List<String> content;
   _Block({required this.id, required this.header, List<String>? content}) : content = content ?? [];
-
-  /// Copia completa (duplicar sección = encabezado + letra).
-  _Block copy() => _Block(id: uid(), header: header, content: [...content]);
 
   /// Texto crudo del bloque conservando el formato original.
   String toRaw() => [

@@ -96,7 +96,7 @@ Uint8List buildSetlistPdf(Setlist list, List<Song> songs) {
       );
       y += 24;
 
-      for (final sec in parseSong(song.body)) {
+      for (final sec in sectionsInOrder(song.body, song.structure)) {
         if (y > 740) breakPage();
         page.graphics.drawString(sec.label.toUpperCase(), labelFont, bounds: Rect.fromLTWH(margin, y, maxWidth, 18));
         y += 20;

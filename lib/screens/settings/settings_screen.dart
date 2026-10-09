@@ -3,6 +3,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../data/seed.dart';
 import '../../data/store.dart';
+import '../../services/biblioteca_export.dart';
 import '../../theme.dart';
 import '../home/home_splash.dart';
 import 'legal_screen.dart';
@@ -40,6 +41,20 @@ class SettingsScreen extends StatelessWidget {
         const ListTile(title: Text('Tamaño de letra por defecto')),
         Slider(value: prefs.defaultFontSize, min: 12, max: 34, divisions: 22, label: prefs.defaultFontSize.toInt().toString(), onChanged: (v) => prefs.setDefaultFontSize(v)),
         Center(child: Text('Vista previa:', style: TextStyle(fontSize: prefs.defaultFontSize))),
+        const Divider(),
+        const ListTile(title: Text('Biblioteca', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+        ListTile(
+          leading: const Icon(Icons.ios_share, color: AppColors.accent),
+          title: const Text('Compartir biblioteca'),
+          subtitle: const Text('Envía todas tus canciones y grupos a otra persona'),
+          onTap: () => shareLibrary(context, store),
+        ),
+        ListTile(
+          leading: const Icon(Icons.file_download_outlined, color: AppColors.warm),
+          title: const Text('Importar biblioteca'),
+          subtitle: const Text('Añade canciones desde un archivo compartido'),
+          onTap: () => importLibrary(context, store),
+        ),
         const Divider(),
         const ListTile(title: Text('Preferencias', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
         SwitchListTile(

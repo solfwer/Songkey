@@ -182,6 +182,29 @@ List<Section> parseSong(String raw) {
   return sections.where((s) => s.lines.isNotEmpty || s.kind != SectionKind.other).toList();
 }
 
+/// Secciones en orden de interpretación ("mapa de toque"). Si [structure]
+/// (encabezados, admite repeticiones) está definido, se reordenan/repten las
+/// secciones canónicas del cuerpo; si no, se devuelve el orden del texto tal
+/// cual. Un encabezado de la estructura que ya no exista en el texto se ignora.
+List<Section> sectionsInOrder(String body, List<String>? structure) {
+  final canon = parseSong(body);
+  if (structure == null || structure.isEmpty) return canon;
+  final byLabel = <String, Section>{};
+  for (final s in canon) {
+    byLabel.putIfAbsent(s.label.trim(), () => s);
+  }
+  final out = <Section>[];
+  for (final h in structure) {
+    final key = h.trim();
+    final sec = key.isEmpty
+        // Texto inicial sin encabezado guardado: la sección "Inicio" del parser.
+        ? (canon.isNotEmpty && canon.first.label.trim() == 'Inicio' ? canon.first : null)
+        : byLabel[key];
+    if (sec != null) out.add(sec);
+  }
+  return out.isEmpty ? canon : out;
+}
+
 const _sharps = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const _flats = {'Db': 'C#', 'Eb': 'D#', 'Gb': 'F#', 'Ab': 'G#', 'Bb': 'A#', 'Cb': 'B', 'Fb': 'E'};
 

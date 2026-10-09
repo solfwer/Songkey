@@ -104,7 +104,7 @@ class _SongScreenState extends State<SongScreen> {
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
-        title: Text(displayed.title, maxLines: 2, overflow: TextOverflow.visible, style: const TextStyle(fontSize: 17)),
+        title: Text(displayed.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17)),
         actions: [
           _KeySelector(song: displayed, value: config.semitones == 0 ? null : sharpen(transposeChord(displayed.key, config.semitones)), american: config.americanNotation, onSelected: (k) => setState(() => config.semitones = semitoneShift(displayed.key, k))),
           IconButton(icon: const Icon(Icons.tune), tooltip: 'Opciones de vista', onPressed: () => _scaffoldKey.currentState?.openEndDrawer()),
@@ -214,7 +214,19 @@ class _SongPageState extends State<_SongPage> {
 
   @override
   Widget build(BuildContext context) {
-    final sections = parseSong(widget.song.body);
+    // Secciones en orden de toque (repeticiones incluidas según la
+    // estructura), con ids únicos por aparición para los saltos de sección.
+    final ordered = sectionsInOrder(widget.song.body, widget.song.structure);
+    final sections = <Section>[
+      for (var i = 0; i < ordered.length; i++)
+        Section(
+          id: 'sec$i',
+          kind: ordered[i].kind,
+          abbr: ordered[i].abbr,
+          label: ordered[i].label,
+          lines: ordered[i].lines,
+        ),
+    ];
 
     // Mantener las claves de sección alineadas con las secciones actuales.
     final ids = sections.map((x) => x.id).toSet();
@@ -224,9 +236,15 @@ class _SongPageState extends State<_SongPage> {
     }
 
     return Column(children: [
+      // Título completo (el de la barra superior se recorta para no tapar el
+      // selector de tonalidad).
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
+        child: Text(widget.song.title, textAlign: TextAlign.center, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
+      ),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        child: Text(_metaLine(), style: const TextStyle(color: Colors.grey)),
+        child: Text(_metaLine(), textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
       ),
       SectionChips(
         sections: sections,

@@ -20,6 +20,13 @@ class Song {
   /// Momento de la última apertura (ISO-8601) para "Canciones recientes".
   String? lastOpenedAt;
 
+  /// Orden de toque (el "mapa"): encabezados de sección en orden de
+  /// interpretación, admite repeticiones (["Verso 1", "Coro", "Verso 1"]).
+  /// La letra de cada sección se guarda una sola vez en [body]; las
+  /// repeticiones viven solo aquí. null o [] = usar el orden del cuerpo
+  /// tal como está escrito (comportamiento anterior).
+  List<String>? structure;
+
   Song({
     required this.id,
     required this.title,
@@ -31,6 +38,7 @@ class Song {
     this.style,
     this.durationSec,
     this.lastOpenedAt,
+    this.structure,
   });
 
   Map<String, dynamic> toJson() => {
@@ -44,6 +52,7 @@ class Song {
         'style': style,
         'durationSec': durationSec,
         'lastOpenedAt': lastOpenedAt,
+        'structure': structure,
       };
 
   factory Song.fromJson(Map<String, dynamic> j) => Song(
@@ -57,6 +66,7 @@ class Song {
         style: j['style'],
         durationSec: j['durationSec'],
         lastOpenedAt: j['lastOpenedAt'],
+        structure: (j['structure'] as List?)?.map((e) => e.toString()).toList(),
       );
 
   /// Copia de la canción cambiando solo lo indicado (mantiene id y resto).
@@ -70,6 +80,7 @@ class Song {
     String? style,
     int? durationSec,
     String? lastOpenedAt,
+    List<String>? structure,
   }) =>
       Song(
         id: id,
@@ -82,5 +93,6 @@ class Song {
         style: style ?? this.style,
         durationSec: durationSec ?? this.durationSec,
         lastOpenedAt: lastOpenedAt ?? this.lastOpenedAt,
+        structure: structure ?? this.structure,
       );
 }
