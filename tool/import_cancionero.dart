@@ -1,15 +1,22 @@
 // Herramienta: convierte un cancionero ChordPro (.cho) en un JSON importable
 // por Songkey (Ajustes > Biblioteca > Importar biblioteca).
 //
-// Uso: dart run tool/import_cancionero.dart [carpeta] [salida.json] [salida_reporte.txt]
+// Uso: dart run tool/import_cancionero.dart [--literal] [carpeta] [salida.json] [salida_reporte.txt]
 //
-// - Respeta el formato de Song.toJson (id, title, author, key, bpm, groupId,
-//   body, style, durationSec, lastOpenedAt, structure) y el envoltorio de
-//   biblioteca {app: 'Songkey', version: 1, groups: [], songs: [...]}.
-// - Descartan copias con letra idéntica (conserva la primera por orden de
-//   archivo) y marcan en el informe: mismo título con letra distinta, títulos
-//   parecidos y canciones que ya existen en la biblioteca de ejemplo.
-// - No requiere depender de Flutter: solo dart:core/io/convert.
+// Modo normal (por defecto):
+//   - {title: X} -> campo Título; {key: X} -> campo Tono (si existe).
+//   - {start_of_X: ETIQUETA}/{end_of_X} -> cabeceras de sección limpias
+//     (VERSO 1, CORO, PUENTE...) que la app sí reconoce para sus chips.
+//   - {comment: ...} -> línea de texto sin corchetes.
+//   - El resto de directivas {..} se elimina. La letra y acordes quedan iguales.
+//
+// Modo literal (--literal): el cuerpo es el texto CRUDO del .cho, línea por
+// línea, EXCEPTO {title:}/{key:} que pasan a campos. La app mostrará las
+// directivas {..} como texto visible y no detectará secciones (chips/mapa).
+//
+// En ambos modos: se descartan copias con letra idéntica, se marcan títulos
+// iguales con letra distinta y títulos parecidos, todo en un informe.
+// No requiere Flutter: solo dart:core/io/convert.
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -38,7 +45,7 @@ String normalize(String s) {
   return t.replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
 }
 
-/// "AQUÍ ESTOY" -> "Aquí Estoy"; "ERES TÚ (DANILO MONTERO)" -> "Eres Tú (Danilo Montero)".
+/// "AQUÍ ESTOY" -> "Aquí Estoy".
 String titleCase(String s) {
   final words = s.trim().split(RegExp(r'\s+'));
   return words
@@ -75,7 +82,7 @@ class ParsedSong {
   ParsedSong(this.file, this.title, this.key, this.body);
 }
 
-ParsedSong parseFile(String path) {
+ParsedSong parseFile(String path, {required bool literal}) {
   var text = File(path).readAsStringSync();
   if (text.startsWith('\uFEFF')) text = text.substring(1);
   final lines =
@@ -83,7 +90,6 @@ ParsedSong parseFile(String path) {
 
   String? title;
   String? key;
-  final out = <String>[];
 
   final dirTitle = RegExp(r'^\{title:\s*([^}]*)\}', caseSensitive: false);
   final dirKey = RegExp(r'^\{key:\s*([^}]*)\}', caseSensitive: false);
@@ -96,65 +102,88 @@ ParsedSong parseFile(String path) {
   final dirOther =
       RegExp(r'^\{[a-z_]+(?::[^}]*)?\}', caseSensitive: false);
 
-  for (final raw in lines) {
-    final t = raw.trim();
-    if (t.isEmpty) {
-      out.add('');
-      continue;
-    }
-
-    final mTitle = dirTitle.firstMatch(t);
-    if (mTitle != null) {
-      title = mTitle.group(1)!.trim();
-      continue;
-    }
-    final mKey = dirKey.firstMatch(t);
-    if (mKey != null) {
-      key = mKey.group(1)!.trim();
-      continue;
-    }
-    final mCom = dirComment.firstMatch(t);
-    if (mCom != null) {
-      // Notas musicales: quitar corchetes de acorde, conservar el texto.
-      out.add(mCom.group(1)!.trim().replaceAll(RegExp(r'\[|\]'), ''));
-      continue;
-    }
-    final mS = dirStart.firstMatch(t);
-    if (mS != null) {
-      final label = mS.group(2)!.trim();
-      out.add(label.isEmpty ? defaultLabel(mS.group(1)!) : label);
-      continue;
-    }
-    final mS2 = dirStartNoLabel.firstMatch(t);
-    if (mS2 != null) {
-      out.add(defaultLabel(mS2.group(1)!));
-      continue;
-    }
-    if (dirEnd.hasMatch(t)) {
-      out.add('');
-      continue;
-    }
-    if (dirOther.hasMatch(t)) continue;
-    out.add(t);
-  }
-
-  // Colapsar líneas en blanco repetidas, recortar el final.
-  final collapsed = <String>[];
-  var prevBlank = false;
-  for (final l in out) {
-    final s = l.trimRight();
-    if (s.trim().isEmpty) {
-      if (!prevBlank && collapsed.isNotEmpty) {
-        collapsed.add('');
-        prevBlank = true;
+  String body;
+  if (literal) {
+    // Cuerpo CRUDO: línea por línea, menos {title:} y {key:} (van a campos).
+    final out = <String>[];
+    for (final raw in lines) {
+      final t = raw.trim();
+      final mTitle = dirTitle.firstMatch(t);
+      if (mTitle != null) {
+        title = mTitle.group(1)!.trim();
+        continue;
       }
-    } else {
-      collapsed.add(s);
-      prevBlank = false;
+      final mKey = dirKey.firstMatch(t);
+      if (mKey != null) {
+        key = mKey.group(1)!.trim();
+        continue;
+      }
+      out.add(raw);
     }
-  }
-  while (collapsed.isNotEmpty && collapsed.last.trim().isEmpty) {
-    collapsed.removeLast();
+    while (out.isNotEmpty && out.first.trim().isEmpty) out.removeAt(0);
+    while (out.isNotEmpty && out.last.trim().isEmpty) out.removeLast();
+    body = out.join('\n');
+  } else {
+    final out = <String>[];
+    for (final raw in lines) {
+      final t = raw.trim();
+      if (t.isEmpty) {
+        out.add('');
+        continue;
+      }
+      final mTitle = dirTitle.firstMatch(t);
+      if (mTitle != null) {
+        title = mTitle.group(1)!.trim();
+        continue;
+      }
+      final mKey = dirKey.firstMatch(t);
+      if (mKey != null) {
+        key = mKey.group(1)!.trim();
+        continue;
+      }
+      final mCom = dirComment.firstMatch(t);
+      if (mCom != null) {
+        // Notas musicales: quitar corchetes de acorde, conservar el texto.
+        out.add(mCom.group(1)!.trim().replaceAll(RegExp(r'\[|\]'), ''));
+        continue;
+      }
+      final mS = dirStart.firstMatch(t);
+      if (mS != null) {
+        final label = mS.group(2)!.trim();
+        out.add(label.isEmpty ? defaultLabel(mS.group(1)!) : label);
+        continue;
+      }
+      final mS2 = dirStartNoLabel.firstMatch(t);
+      if (mS2 != null) {
+        out.add(defaultLabel(mS2.group(1)!));
+        continue;
+      }
+      if (dirEnd.hasMatch(t)) {
+        out.add('');
+        continue;
+      }
+      if (dirOther.hasMatch(t)) continue;
+      out.add(t);
+    }
+    // Colapsar líneas en blanco repetidas, recortar el final.
+    final collapsed = <String>[];
+    var prevBlank = false;
+    for (final l in out) {
+      final s = l.trimRight();
+      if (s.trim().isEmpty) {
+        if (!prevBlank && collapsed.isNotEmpty) {
+          collapsed.add('');
+          prevBlank = true;
+        }
+      } else {
+        collapsed.add(s);
+        prevBlank = false;
+      }
+    }
+    while (collapsed.isNotEmpty && collapsed.last.trim().isEmpty) {
+      collapsed.removeLast();
+    }
+    body = collapsed.join('\n');
   }
 
   if (title == null || title!.isEmpty) {
@@ -168,7 +197,7 @@ ParsedSong parseFile(String path) {
     title = titleCase(title);
   }
 
-  return ParsedSong(path, title!, (key ?? 'C').trim(), collapsed.join('\n'));
+  return ParsedSong(path, title!, (key ?? 'C').trim(), body);
 }
 
 int levenshtein(String a, String b) {
@@ -191,15 +220,21 @@ int levenshtein(String a, String b) {
 }
 
 void main(List<String> args) {
-  final folder = args.isNotEmpty
-      ? args[0]
+  final literal = args.contains('--literal');
+  final positional = args.where((a) => !a.startsWith('--')).toList();
+  final folder = positional.isNotEmpty
+      ? positional[0]
       : r'C:\Users\josue\Downloads\cancionero_chordpro\word_revisado';
-  final outJson = args.length > 1
-      ? args[1]
-      : r'C:\Users\josue\Downloads\Songkey_cancionero_nuevas.json';
-  final outReport = args.length > 2
-      ? args[2]
-      : r'C:\Users\josue\Downloads\cancionero_revisado.txt';
+  final outJson = positional.length > 1
+      ? positional[1]
+      : literal
+          ? r'C:\Users\josue\Downloads\Songkey_cancionero_literal.json'
+          : r'C:\Users\josue\Downloads\Songkey_cancionero_nuevas.json';
+  final outReport = positional.length > 2
+      ? positional[2]
+      : literal
+          ? r'C:\Users\josue\Downloads\cancionero_revisado_literal.txt'
+          : r'C:\Users\josue\Downloads\cancionero_revisado.txt';
 
   final files = Directory(folder)
       .listSync()
@@ -207,9 +242,10 @@ void main(List<String> args) {
       .where((f) => f.path.toLowerCase().endsWith('.cho'))
       .toList()
     ..sort((a, b) => a.path.compareTo(b.path));
+  print('Modo: ${literal ? 'LITERAL (cuerpo crudo del .cho)' : 'limpio (secciones convertidas)'}');
   print('Archivos .cho encontrados: ${files.length}');
 
-  final parsed = files.map((f) => parseFile(f.path)).toList();
+  final parsed = files.map((f) => parseFile(f.path, literal: literal)).toList();
 
   // Títulos de la biblioteca de ejemplo (seed) para avisar de coincidencias.
   final seedNorm = <String>{};
@@ -262,11 +298,11 @@ void main(List<String> args) {
       final b = normTitles[j];
       final minLen = a.length < b.length ? a.length : b.length;
       if (minLen < 5) continue;
-      final similar = a.contains(b) ||
-          b.contains(a) ||
-          levenshtein(a, b) <= 2;
+      final similar =
+          a.contains(b) || b.contains(a) || levenshtein(a, b) <= 2;
       if (similar) {
-        similarPairs.add('"${byTitle[a]!.first.title}" ↔ "${byTitle[b]!.first.title}"');
+        similarPairs.add(
+            '"${byTitle[a]!.first.title}" ↔ "${byTitle[b]!.first.title}"');
       }
     }
   }
@@ -302,13 +338,19 @@ void main(List<String> args) {
 
   // Escribir el informe.
   final sb = StringBuffer();
-  sb.writeln('=== RESUMEN ===');
+  sb.writeln('=== RESUMEN (modo: ${literal ? 'LITERAL' : 'limpio'}) ===');
   sb.writeln('Archivos .cho encontrados: ${files.length}');
   sb.writeln('Canciones nuevas (a importar): ${keep.length}');
   sb.writeln('Copias idénticas descartadas: ${dropped.length}');
   sb.writeln('Grupos con mismo título pero letra distinta: ${sameTitleDifferent.length}');
   sb.writeln('Posibles similares (revisar): ${similarPairs.length}');
   sb.writeln('Ya en la biblioteca de ejemplo de la app: ${seedHits.length}');
+  if (literal) {
+    sb.writeln('');
+    sb.writeln('AVISO: el cuerpo es el .cho crudo; la app mostrará las directivas');
+    sb.writeln('{start_of_...}, {end_of_...}, {comment:...} como texto visible y NO');
+    sb.writeln('detectará secciones (chips ni mapa de toque).');
+  }
   sb.writeln('');
   sb.writeln('=== CANCIONES NUEVAS ===');
   for (var i = 0; i < keep.length; i++) {
