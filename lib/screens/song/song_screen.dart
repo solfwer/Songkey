@@ -197,6 +197,7 @@ class _SongPageState extends State<_SongPage> {
     final group = widget.store.state.groups.where((g) => g.id == widget.song.groupId).map((g) => g.name).firstOrNull;
     final parts = <String>[
       group ?? 'Sin grupo',
+      if (widget.song.author != null && widget.song.author!.isNotEmpty) widget.song.author!,
       if (widget.song.style != null && widget.song.style!.isNotEmpty) widget.song.style!,
       'Tono: ${_displayedKey()}',
       if (widget.song.bpm != null) '${widget.song.bpm} BPM',

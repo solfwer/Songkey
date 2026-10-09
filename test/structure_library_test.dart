@@ -28,6 +28,15 @@ void main() {
       final secs = sectionsInOrder(body, ['Verso 1', 'Puente 9']);
       expect(secs.map((s) => s.label.trim()).toList(), ['Verso 1']);
     });
+
+    test('el nombre del orden de toque casa sin distinguir maysculas ni acentos', () {
+      // El cancionero escribe "VERSO 1" y el parser lo normaliza a "Verso 1":
+      // el orden de toque debe seguir funcionando con las dos escrituras.
+      const body = '{start_of_verse: VERSO 1}\n[G]letra\n{end_of_verse}\n{start_of_chorus: CORO}\n[C]coro\n{end_of_chorus}';
+      final secs = sectionsInOrder(body, ['CORO', 'VERSO 1', 'CORO']);
+      expect(secs.map((s) => s.label).toList(), ['CORO', 'VERSO 1', 'CORO']);
+      expect(identical(secs[0], secs[2]), isTrue);
+    });
   });
 
   group('Song.structure', () {

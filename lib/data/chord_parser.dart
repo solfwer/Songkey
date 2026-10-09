@@ -34,6 +34,28 @@ final _header = RegExp(
   r'^\s*[[{(]?\s*(coro|chorus|estribillo|pre-?coro|pre-?chorus|verso|verse|estrofa|puente|bridge|intro|outro|final|tag|interludio|instrumental|transicion|introduccion|presentacion)\s*(\d*)\s*[\]})]?\s*:?\s*$',
 );
 
+/// Directiva que abre sección: `{start_of_verse: VERSO 1}`. El texto tras los
+/// dos puntos es la etiqueta tal cual del cancionero ("CORO", "PRE-CORO"...).
+final _startOf = RegExp(
+  r'^\s*\{\s*start(?:_of)?_([a-z_]+)\s*[:=]?\s*(.*?)\s*\}\s*$',
+  caseSensitive: false,
+);
+
+/// `{end_of_verse}` y compañía: cierran sección, no aportan texto.
+final _endOf = RegExp(r'^\s*\{\s*end(?:_of)?_[a-z_]+\s*\}\s*$', caseSensitive: false);
+
+/// Comentario ChordPro: `{comment: ...}`, `{c: ...}`, `{gc: ...}`.
+final _comment = RegExp(
+  r'^\s*\{\s*(?:comment|c|comment_italic|gc|guitar_comment)\s*[:=]\s*(.*?)\s*\}\s*$',
+  caseSensitive: false,
+);
+
+/// Directivas de metadatos (título, tono, tempo...) que no se dibujan.
+final _metaDirective = RegExp(
+  r'^\s*\{\s*(title|t|subtitle|st|key|k|artist|author|composer|album|tempo|bpm|capo|time|duration|footer|copyright|arranger|lyricist|meter|highlight|columns|new_page|np|songbook|transpose)\s*[:=].*\}\s*$',
+  caseSensitive: false,
+);
+
 final _chord = RegExp(
   r'^\(?[A-G][#b]?(?:maj|min|m|M|dim|aug|sus|add|°|\+)?\d*(?:(?:sus|add|maj|b|#)\d+)*(?:\/[A-G][#b]?)?\)?$',
 );
@@ -41,7 +63,42 @@ final _chord = RegExp(
 bool isChord(String t) => _chord.hasMatch(t);
 
 /// Reconoce líneas que actúan como encabezado de sección ("Verso 1", "Coro", etc.)
-bool isSectionHeader(String line) => _header.hasMatch(_deaccent(line));
+/// y también las directivas ChordPro que abren sección (`{start_of_verse: VERSO 1}`).
+bool isSectionHeader(String line) =>
+    _header.hasMatch(_deaccent(line)) || _startOf.hasMatch(line.trim());
+
+/// true si la línea es una directiva ChordPro de apertura de sección.
+bool isChordProSectionStart(String line) => _startOf.hasMatch(line.trim());
+
+/// true si la línea es una directiva ChordPro que no se dibuja (metadatos,
+/// cierres de sección, `{new_page}`...).
+bool isChordProDirective(String line) {
+  final l = line.trim();
+  return _startOf.hasMatch(l) || _endOf.hasMatch(l) || _metaDirective.hasMatch(l) ||
+      _comment.hasMatch(l) || RegExp(r'^\s*\{[a-z_]+\s*[:=]?.*\}\s*$', caseSensitive: false).hasMatch(l);
+}
+
+SectionKind _kindFromWord(String w) {
+  final k = w.toLowerCase().replaceAll('-', '').replaceAll('_', '').replaceAll(' ', '');
+  if (k.startsWith('prechorus')) return SectionKind.prechorus;
+  if (k.contains('chorus') || k.contains('estribillo')) return SectionKind.chorus;
+  if (k.contains('verse') || k.contains('estrofa')) return SectionKind.verse;
+  if (k.contains('bridge') || k.contains('puente')) return SectionKind.bridge;
+  if (k.contains('intro') || k.contains('presentacion')) return SectionKind.intro;
+  if (k.contains('outro')) return SectionKind.outro;
+  if (k.contains('final') || k.contains('ending') || k.contains('tag')) return SectionKind.ending;
+  return SectionKind.other;
+}
+
+/// Abreviatura corta a partir de una etiqueta libre ("PRE-CORO" -> "PC",
+/// "VERSO 2" -> "V2", "PUENTE" -> "PU").
+String _abbrFrom(String label) {
+  final num = RegExp(r'(\d+)\s*$').firstMatch(label)?.group(1) ?? '';
+  final letters = label.replaceAll(RegExp(r'[^A-Za-zÁÉÍÓÚáéíóúÑñ]'), '');
+  if (letters.isEmpty) return label.isEmpty ? '•' : label.substring(0, label.length < 3 ? label.length : 3);
+  final base = letters.length <= 2 ? letters.toUpperCase() : letters.substring(0, 2).toUpperCase();
+  return '$base$num';
+}
 
 /// Desplazamiento en semitonos del tono `from` al tono `to` (ambas pueden ser menores, ej. "Bm").
 int semitoneShift(String from, String to) {
@@ -134,6 +191,10 @@ List<Section> parseSong(String raw) {
   final lines = raw.replaceAll('\r', '').split('\n');
   final sections = <Section>[];
   Section? cur;
+  // Comentarios que aparecen antes de la primera sección: se quedan
+  // "pendientes" y se pegan a la siguiente sección que se abra (así
+  // "{comment: INTRODUCCIÓN: ...}" no genera una sección "Inicio" vacía).
+  final pending = <SongLine>[];
   Section ensure() {
     if (cur == null) {
       cur = Section(id: 's0', kind: SectionKind.other, abbr: '•', label: 'Inicio', lines: []);
@@ -142,23 +203,65 @@ List<Section> parseSong(String raw) {
     return cur!;
   }
 
+  /// Abre una sección nueva arrastrando los comentarios pendientes.
+  Section open(SectionKind kind, String abbr, String label) {
+    if (cur != null && cur!.lines.isNotEmpty) cur!.lines.add([]);
+    cur = Section(id: 's${sections.length + 1}', kind: kind, abbr: abbr, label: label, lines: List.of(pending));
+    pending.clear();
+    sections.add(cur!);
+    return cur!;
+  }
+
   for (var i = 0; i < lines.length; i++) {
     final line = lines[i];
     final h = _header.firstMatch(_deaccent(line));
     if (h != null) {
       final info = headerInfo(h.group(1) ?? '', h.group(2) ?? '');
-      cur = Section(
-        id: 's${sections.length + 1}',
-        kind: info.kind,
-        abbr: info.abbr,
-        label: info.label.trim(),
-        lines: [],
-      );
-      sections.add(cur!);
+      open(info.kind, info.abbr, info.label.trim());
       continue;
     }
     if (line.trim().isEmpty) {
       if (cur != null && cur!.lines.isNotEmpty) cur!.lines.add([]);
+      continue;
+    }
+    final trimmed = line.trim();
+    // Directivas ChordPro (el cancionero se guarda tal cual, en modo literal).
+    if (_startOf.hasMatch(trimmed)) {
+      final m = _startOf.firstMatch(trimmed)!;
+      final label = (m.group(2) ?? '').trim();
+      late SectionKind kind;
+      late String abbr;
+      if (label.isEmpty) {
+        final info = headerInfo(m.group(1)!.replaceAll('_', ' '), '');
+        kind = info.kind;
+        abbr = info.abbr;
+      } else {
+        final hh = _header.firstMatch(_deaccent(label));
+        if (hh != null) {
+          final info = headerInfo(hh.group(1)!, hh.group(2) ?? '');
+          kind = info.kind;
+          abbr = info.abbr;
+        } else {
+          kind = _kindFromWord(m.group(1)!);
+          abbr = _abbrFrom(label);
+        }
+      }
+      open(kind, abbr, label);
+      continue;
+    }
+    // Cierres y metadatos: no se dibujan.
+    if (_endOf.hasMatch(trimmed) || _metaDirective.hasMatch(trimmed)) continue;
+    final c = _comment.firstMatch(trimmed);
+    if (c != null) {
+      final text = (c.group(1) ?? '').trim();
+      if (text.isNotEmpty) {
+        final parsed = parseInline(text);
+        if (cur != null) {
+          cur!.lines.add(parsed);
+        } else {
+          pending.add(parsed);
+        }
+      }
       continue;
     }
     final sec = ensure();
@@ -190,17 +293,19 @@ List<Section> parseSong(String raw) {
 List<Section> sectionsInOrder(String body, List<String>? structure) {
   final canon = parseSong(body);
   if (structure == null || structure.isEmpty) return canon;
-  final byLabel = <String, Section>{};
+  // ndice por nombre normalizado ("VERSO 1" y "Verso 1" son la misma seccin).
+  String keyOf(String s) => _deaccent(s.trim()).replaceAll(RegExp(r'\s+'), ' ');
+  final byKey = <String, Section>{};
   for (final s in canon) {
-    byLabel.putIfAbsent(s.label.trim(), () => s);
+    byKey.putIfAbsent(keyOf(s.label), () => s);
   }
   final out = <Section>[];
   for (final h in structure) {
-    final key = h.trim();
+    final key = keyOf(h);
     final sec = key.isEmpty
         // Texto inicial sin encabezado guardado: la sección "Inicio" del parser.
         ? (canon.isNotEmpty && canon.first.label.trim() == 'Inicio' ? canon.first : null)
-        : byLabel[key];
+        : byKey[key];
     if (sec != null) out.add(sec);
   }
   return out.isEmpty ? canon : out;

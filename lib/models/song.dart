@@ -5,14 +5,16 @@
 class Song {
   String id;
   String title;
+
+  /// Autor o creador de la canción (opcional).
   String? author;
-  String? style;
   String key;
   int? bpm;
   String? groupId;
   String body;
 
   /// Estilo musical opcional (ej. "Balada", "Adoración", "Rock").
+  String? style;
 
   /// Duración en segundos (opcional).
   int? durationSec;

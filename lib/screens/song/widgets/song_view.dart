@@ -75,6 +75,12 @@ class SectionChips extends StatelessWidget {
 
 /// Una línea de canción: acordes transpuestos encima de su palabra, o solo
 /// texto si está en modo "solo letra".
+///
+/// Tipos de línea que se reconocen (mismo formato para todas las canciones):
+///  - Línea de letra con acordes inline: cada acorde sobre su sílaba.
+///  - Fila solo de acordes (`[C#m] | [A] | [E] | [B]`): se dibuja en una sola
+///    fila monoespaciada, acordes en azul y barras `|` en gris, como los
+///    visores ChordPro estándar.
 class SongLineView extends StatelessWidget {
   final SongLine line;
   final bool lyricsOnly;
@@ -88,18 +94,49 @@ class SongLineView extends StatelessWidget {
   final bool american;
   const SongLineView({super.key, required this.line, required this.lyricsOnly, required this.semitones, required this.fontSize, this.chordScale = 0.85, this.lineHeight = 1.35, this.chordLineHeight = 1.1, this.american = true});
 
+  /// Línea compuesta únicamente por acordes y separadores (`|`, `-`, `–`):
+  /// es una "progresión" (intro, interludio) y se pinta en una sola fila.
+  bool get _isChordRow {
+    if (line.isEmpty) return false;
+    final sep = RegExp(r'^[\s|\-–—/·]*$');
+    return line.every((s) => s.chord != null && sep.hasMatch(s.text));
+  }
+
   @override
   Widget build(BuildContext context) {
     if (lyricsOnly) {
+      // En modo "solo letra" las progresiones de acordes no aportan nada.
+      if (_isChordRow) return const SizedBox.shrink();
       return Text(
         line.map((x) => x.text).join().replaceAll(RegExp(r'\s+'), ' ').trim(),
         style: TextStyle(fontSize: fontSize, height: lineHeight, color: Colors.white),
       );
     }
+    if (_isChordRow) {
+      const chordColor = Color(0xFF5AD1E6);
+      return Text.rich(
+        TextSpan(
+          children: [
+            for (final seg in line) ...[
+              TextSpan(
+                text: notateChord(transposeChord(seg.chord!, semitones), american: american),
+                style: TextStyle(fontSize: fontSize * chordScale, fontWeight: FontWeight.bold, color: chordColor),
+              ),
+              if (seg.text.isNotEmpty)
+                TextSpan(
+                  text: seg.text,
+                  style: TextStyle(fontSize: fontSize * chordScale, color: Colors.white38),
+                ),
+            ],
+          ],
+        ),
+        style: TextStyle(fontFamily: 'monospace', height: chordLineHeight),
+      );
+    }
     return Wrap(spacing: 0, children: [
       for (final seg in line)
         Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(seg.chord != null ? notateChord(transposeChord(seg.chord!, semitones), american: american) + ' ' : (line.any((x) => x.chord != null) ? ' ' : ''), style: TextStyle(fontSize: fontSize * chordScale, height: chordLineHeight, fontWeight: FontWeight.bold, color: const Color(0xFF5AD1E6), fontFamily: 'monospace')),
+          Text(seg.chord != null ? notateChord(transposeChord(seg.chord!, semitones), american: american) : (line.any((x) => x.chord != null) ? ' ' : ''), style: TextStyle(fontSize: fontSize * chordScale, height: chordLineHeight, fontWeight: FontWeight.bold, color: const Color(0xFF5AD1E6), fontFamily: 'monospace')),
           Text(seg.text.isEmpty ? ' ' : seg.text, style: TextStyle(fontSize: fontSize, height: lineHeight, color: Colors.white)),
         ]),
     ]);
