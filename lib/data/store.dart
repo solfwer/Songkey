@@ -22,6 +22,9 @@ class Store extends ChangeNotifier {
   /// Abrir canciones solo con letra (sin acordes) por defecto.
   bool defaultLyricsOnly = false;
 
+  /// Modo del editor de contenido: true = visual, false = ChordPro.
+  bool editorVisualMode = true;
+
   bool get hasAccount => username.isNotEmpty && _password.isNotEmpty;
 
   Future<void> load() async {
@@ -41,6 +44,7 @@ class Store extends ChangeNotifier {
     setupDone = prefs.getBool('songkey-setup') ?? false;
     americanNotation = prefs.getBool('songkey-american') ?? true;
     defaultLyricsOnly = prefs.getBool('songkey-lyricsonly') ?? false;
+    editorVisualMode = prefs.getBool('songkey-editorvisual') ?? true;
     notifyListeners();
   }
 
@@ -99,6 +103,13 @@ class Store extends ChangeNotifier {
   void setDefaultFontSize(double v) {
     defaultFontSize = v;
     SharedPreferences.getInstance().then((p) => p.setDouble('songkey-fontsize', v));
+    notifyListeners();
+  }
+
+  /// Recuerda el ltimo modo del editor de contenido (visual o ChordPro).
+  void setEditorVisualMode(bool visual) {
+    editorVisualMode = visual;
+    SharedPreferences.getInstance().then((p) => p.setBool('songkey-editorvisual', visual));
     notifyListeners();
   }
 

@@ -14,6 +14,7 @@ import '../../models/song.dart';
 import 'widgets/pdf_import_button.dart';
 import 'widgets/song_view.dart' show sectionKindColor;
 import 'widgets/visual_chord_editor.dart';
+import 'song_editor_tabs.dart';
 
 class SongEditorPage extends StatefulWidget {
   final Store store;
@@ -104,11 +105,13 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
         title: Text(widget.song == null ? 'Nueva canción' : 'Editar canción'),
         bottom: TabBar(
           controller: _tabCtrl,
+          isScrollable: false,
+          labelPadding: const EdgeInsets.symmetric(horizontal: 6),
           tabs: const [
-            Tab(icon: Icon(Icons.info_outline), text: 'Datos'),
-            Tab(icon: Icon(Icons.code), text: 'Texto (ChordPro)'),
-            Tab(icon: Icon(Icons.touch_app), text: 'Editor visual'),
-            Tab(icon: Icon(Icons.account_tree), text: 'Estructura de la canción'),
+            Tab(icon: Icon(Icons.info_outline, size: 20), text: 'Datos'),
+            Tab(icon: Icon(Icons.edit_note, size: 20), text: 'Contenido'),
+            Tab(icon: Icon(Icons.account_tree, size: 20), text: 'Estructura'),
+            Tab(icon: Icon(Icons.visibility, size: 20), text: 'Vista previa'),
           ],
         ),
       ),
@@ -142,37 +145,25 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
               FilledButton(onPressed: save, child: const Text('Guardar')),
             ]),
           ),
-          // Pestaña 2: Texto ChordPro (solo cuerpo)
-          SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              TextField(controller: body, decoration: const InputDecoration(labelText: 'Letra con acordes (ChordPro)', alignLabelWithHint: true), maxLines: 20, style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
-              const SizedBox(height: 12),
-              FilledButton(onPressed: save, child: const Text('Guardar')),
-            ]),
+          // Pestaña 2: Contenido (un solo sitio para la letra y los acordes,
+          // con dos formas de editar: visual o ChordPro).
+          ContentTab(
+            body: body,
+            songKey: key,
+            visualRevision: _visualRev,
+            onVisualChanged: _onVisualChanged,
+            store: widget.store,
+            onSave: save,
           ),
-          // Pestaña 3: editor visual (se recarga si el texto cambi fuera)
-          Column(
-            children: [
-              Expanded(
-                child: VisualChordEditor(
-                  key: ValueKey('visual$_visualRev'),
-                  initialBody: body.text,
-                  songKey: key.text,
-                  onChanged: _onVisualChanged,
-                ),
-              ),
-              SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: FilledButton(onPressed: save, child: const Text('Guardar')),
-                ),
-              ),
-            ],
-          ),
-          // Pestaña 4: mapa de toque de la canción
+          // Pestaña 3: secciones y orden de toque
           _SectionsTab(controller: body, initialStructure: _structure, onStructureChanged: (v) => _structure = v),
+          // Pestaña 4: vista previa de cmo queda la cancin
+          PreviewTab(
+            body: body,
+            structure: _structure,
+            songKey: key,
+            title: title,
+          ),
         ],
       ),
     );

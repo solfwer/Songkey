@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../../data/chord_parser.dart';
 import '../../../theme.dart';
+import 'song_view.dart';
+import 'header_badge.dart';
 
 /// Widget para editar acordes visualmente sobre la letra.
 /// - Tap en una línea → muestra picker de acordes en esa posición.
@@ -264,9 +266,15 @@ class _VisualChordEditorState extends State<VisualChordEditor> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Número de línea
-                      SizedBox(width: 36, child: Text('${i + 1}', style: mono.copyWith(fontSize: 12, color: Colors.grey))),
-                      const SizedBox(width: 8),
+                      // Número de línea (con badge de color en los encabezados
+                      // de sección, para que se lean igual que en la vista)
+                      if (isHeader) ...[
+                        HeaderBadge(line: line),
+                        const SizedBox(width: 8),
+                      ] else ...[
+                        SizedBox(width: 36, child: Text('${i + 1}', style: mono.copyWith(fontSize: 12, color: Colors.grey))),
+                        const SizedBox(width: 8),
+                      ],
                       // Texto con acordes superpuestos como chips
                       Expanded(
                         child: _LyricLineWithChords(
