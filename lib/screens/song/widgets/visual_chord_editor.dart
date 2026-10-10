@@ -1,14 +1,19 @@
+// Editor visual de acordes: se toca una linea de la letra y luego un acorde
+// de la barra rpida, sin hace falta saber la sintaxis ChordPro.
+//
+//  * Barra rpida arriba: acordes de la tonalidad, inversiones y variantes
+//    del acorde marcado, ms el boton `[]` para escribirlo a mano.
+//  * Deshacer / rehacer.
+//  * Flechas para mover el acorde o la linea seleccionados.
+//  * Encabezados de seccion con su badge de color.
 import 'package:flutter/material.dart';
 
 import '../../../data/chord_parser.dart';
 import '../../../theme.dart';
-import 'song_view.dart';
+import 'chord_quick_bar.dart';
 import 'header_badge.dart';
+import 'song_view.dart';
 
-/// Widget para editar acordes visualmente sobre la letra.
-/// - Tap en una línea → muestra picker de acordes en esa posición.
-/// - Flechas ◀ ▶ mueven el acorde seleccionado 1 carácter.
-/// - Undo/Redo con botones.
 class VisualChordEditor extends StatefulWidget {
   final String initialBody; // cuerpo ChordPro original
   final String songKey; // tonalidad actual
@@ -26,11 +31,12 @@ class _VisualChordEditorState extends State<VisualChordEditor> {
   int _selectedChordIdx = -1;
   int _selectedLine = -1;
   int _tapCharIndex = 0;
-  // Clave por línea para obtener su RenderBox real (el contexto del itemBuilder
-  // apunta al Sliver, no al ítem).
+
+  // Clave por linea para obtener su RenderBox real (el contexto del
+  // itemBuilder apunta al Sliver, no al item).
   final Map<int, GlobalKey> _lineKeys = {};
 
-  // Undo/Redo stacks
+  // Pilas de deshacer / rehacer.
   final List<({List<String> lines, List<PositionedChord> chords, int selIdx, int selLine, int tapChar})> _undoStack = [];
   final List<({List<String> lines, List<PositionedChord> chords, int selIdx, int selLine, int tapChar})> _redoStack = [];
 
@@ -99,33 +105,35 @@ class _VisualChordEditorState extends State<VisualChordEditor> {
     widget.onChanged(positionedToChordPro(_lyricLines, _chords));
   }
 
-  // --- Interacción ---
+  // --- Interaccion ---
+
+  /// Tocar una linea la selecciona y fija el punto de insercion. Los encabezados
+  /// se saltan (no llevan acordes).
   void _onLineTap(int lineIdx, TapDownDetails details, GlobalKey lineKey) {
     if (widget.readOnly) return;
     if (lineIdx < 0 || lineIdx >= _lyricLines.length) return;
     final line = _lyricLines[lineIdx];
-    if (isSectionHeader(line)) return; // no colocar acordes en encabezados
+    if (isSectionHeader(line)) return;
 
     final box = lineKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null || !box.attached) return;
-
-    final offset = box.globalToLocal(details.globalPosition);
-    // Descontar el prefijo visual: padding izq (8) + número de línea (36) + hueco (8).
-    const prefix = 52.0;
-    final textPainter = TextPainter(
-      text: TextSpan(text: line, style: const TextStyle(fontFamily: 'monospace', fontSize: 16)),
-      textDirection: TextDirection.ltr,
-    )..layout(maxWidth: (box.size.width - prefix - 8).clamp(40.0, double.infinity));
-    final adjusted = Offset((offset.dx - prefix).clamp(0.0, double.infinity), offset.dy);
-    final pos = textPainter.getPositionForOffset(adjusted);
-    final charIdx = pos.offset.clamp(0, line.length);
+    var charIdx = line.length;
+    if (box != null && box.attached) {
+      final offset = box.globalToLocal(details.globalPosition);
+      // Descontar el prefijo visual: padding izq (8) + numero de linea (36) + hueco (8).
+      const prefix = 52.0;
+      final textPainter = TextPainter(
+        text: TextSpan(text: line, style: const TextStyle(fontFamily: 'monospace', fontSize: 16)),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: (box.size.width - prefix - 8).clamp(40.0, double.infinity));
+      final adjusted = Offset((offset.dx - prefix).clamp(0.0, double.infinity), offset.dy);
+      charIdx = textPainter.getPositionForOffset(adjusted).offset.clamp(0, line.length);
+    }
 
     setState(() {
       _selectedLine = lineIdx;
       _tapCharIndex = charIdx;
       _selectedChordIdx = _findChordAt(lineIdx, charIdx);
     });
-    _showChordPicker(lineIdx, charIdx);
   }
 
   int _findChordAt(int lineIdx, int charIdx) {
@@ -135,42 +143,52 @@ class _VisualChordEditorState extends State<VisualChordEditor> {
     return -1;
   }
 
-  void _showChordPicker(int lineIdx, int charIdx) {
+  /// Linea sobre la que se inserta: la elegida, o la primera con letra.
+  int get _lineaDeInsercion {
+    if (_selectedLine >= 0 && _selectedLine < _lyricLines.length && !isSectionHeader(_lyricLines[_selectedLine])) {
+      return _selectedLine;
+    }
+    for (var i = 0; i < _lyricLines.length; i++) {
+      if (!isSectionHeader(_lyricLines[i])) return i;
+    }
+    return -1;
+  }
+
+  /// Inserta (o cambia) el acorde elegido en la barra rapida.
+  void _insertarAcorde(String chord) {
+    final lineIdx = _lineaDeInsercion;
+    if (lineIdx < 0) return;
+    _saveSnapshot();
+    setState(() {
+      if (_selectedChordIdx >= 0 && _selectedChordIdx < _chords.length) {
+        // Habia un acorde marcado: se sustituye.
+        _chords[_selectedChordIdx] = _chords[_selectedChordIdx].copyWith(chord: chord);
+      } else {
+        _chords.add(PositionedChord(lineIndex: lineIdx, charIndex: _tapCharIndex.clamp(0, _lyricLines[lineIdx].length), chord: chord));
+        _selectedChordIdx = _chords.length - 1;
+        _selectedLine = lineIdx;
+      }
+      _chords.sort((a, b) => a.lineIndex != b.lineIndex ? a.lineIndex.compareTo(b.lineIndex) : a.charIndex.compareTo(b.charIndex));
+    });
+    _notifyChange();
+  }
+
+  /// El boton `[]`: escribe el acorde a mano y se inserta igual.
+  void _pedirAcordeAMano() {
+    final lineIdx = _lineaDeInsercion;
+    if (lineIdx < 0) return;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) => _ChordPickerSheet(
-        currentKey: widget.songKey,
-        lyricLine: _lyricLines[lineIdx],
-        charIndex: charIdx,
-        existingChord: _selectedChordIdx >= 0 ? _chords[_selectedChordIdx].chord : null,
-        onPick: (chord) {
-          _saveSnapshot();
-          setState(() {
-            if (_selectedChordIdx >= 0) {
-              _chords[_selectedChordIdx] = _chords[_selectedChordIdx].copyWith(chord: chord);
-            } else {
-              _chords.add(PositionedChord(lineIndex: lineIdx, charIndex: charIdx, chord: chord));
-              _selectedChordIdx = _chords.length - 1;
-            }
-            _chords.sort((a, b) => a.lineIndex != b.lineIndex ? a.lineIndex.compareTo(b.lineIndex) : a.charIndex.compareTo(b.charIndex));
-          });
-          _notifyChange();
-          Navigator.pop(ctx);
-        },
-        onDelete: _selectedChordIdx >= 0
-            ? () {
-                _saveSnapshot();
-                setState(() {
-                  _chords.removeAt(_selectedChordIdx);
-                  _selectedChordIdx = -1;
-                  _selectedLine = -1;
-                });
-                _notifyChange();
-                Navigator.pop(ctx);
-              }
-            : null,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 16 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: ManualChordField(
+          onSubmit: (chord) {
+            _insertarAcorde(chord);
+            Navigator.pop(ctx);
+          },
+        ),
       ),
     );
   }
@@ -210,7 +228,7 @@ class _VisualChordEditorState extends State<VisualChordEditor> {
 
     return Column(
       children: [
-        // Toolbar
+        // Barra de herramientas
         if (!widget.readOnly)
           Container(
             padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
@@ -223,26 +241,59 @@ class _VisualChordEditorState extends State<VisualChordEditor> {
                     IconButton(icon: const Icon(Icons.undo), tooltip: 'Deshacer', visualDensity: VisualDensity.compact, onPressed: _undoStack.isNotEmpty ? _undo : null),
                     IconButton(icon: const Icon(Icons.redo), tooltip: 'Rehacer', visualDensity: VisualDensity.compact, onPressed: _redoStack.isNotEmpty ? _redo : null),
                     const SizedBox(width: 4),
-                    const Expanded(child: Text('Editor visual de acordes', overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold))),
+                    Expanded(
+                      child: Text(
+                        _selectedChordIdx >= 0 ? 'Acorde marcado: ${_chords[_selectedChordIdx].chord}' : 'Editor visual de acordes',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
                   ],
                 ),
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
-                      const Padding(padding: EdgeInsets.only(left: 8, right: 4), child: Text('Mover acorde / línea:', style: TextStyle(color: Colors.grey, fontSize: 12))),
-                      IconButton(icon: const Icon(Icons.chevron_left), tooltip: 'Mover acorde ←', onPressed: _selectedChordIdx >= 0 ? () => _nudgeSelected(-1) : null),
-                      IconButton(icon: const Icon(Icons.chevron_right), tooltip: 'Mover acorde →', onPressed: _selectedChordIdx >= 0 ? () => _nudgeSelected(1) : null),
+                      const Padding(padding: EdgeInsets.only(left: 8, right: 4), child: Text('Mover acorde / linea:', style: TextStyle(color: Colors.grey, fontSize: 12))),
+                      IconButton(icon: const Icon(Icons.chevron_left), tooltip: 'Mover acorde ←', visualDensity: VisualDensity.compact, onPressed: _selectedChordIdx >= 0 ? () => _nudgeSelected(-1) : null),
+                      IconButton(icon: const Icon(Icons.chevron_right), tooltip: 'Mover acorde →', visualDensity: VisualDensity.compact, onPressed: _selectedChordIdx >= 0 ? () => _nudgeSelected(1) : null),
                       Container(width: 1, height: 24, margin: const EdgeInsets.symmetric(horizontal: 6), color: Colors.grey),
-                      IconButton(icon: const Icon(Icons.keyboard_arrow_up), tooltip: 'Subir de línea', onPressed: _selectedChordIdx >= 0 ? () => _moveSelectedLine(-1) : null),
-                      IconButton(icon: const Icon(Icons.keyboard_arrow_down), tooltip: 'Bajar de línea', onPressed: _selectedChordIdx >= 0 ? () => _moveSelectedLine(1) : null),
+                      IconButton(icon: const Icon(Icons.keyboard_arrow_up), tooltip: 'Subir de linea', visualDensity: VisualDensity.compact, onPressed: _selectedChordIdx >= 0 ? () => _moveSelectedLine(-1) : null),
+                      IconButton(icon: const Icon(Icons.keyboard_arrow_down), tooltip: 'Bajar de linea', visualDensity: VisualDensity.compact, onPressed: _selectedChordIdx >= 0 ? () => _moveSelectedLine(1) : null),
+                      if (_selectedChordIdx >= 0) ...[
+                        Container(width: 1, height: 24, margin: const EdgeInsets.symmetric(horizontal: 6), color: Colors.grey),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                          tooltip: 'Quitar el acorde marcado',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () {
+                            _saveSnapshot();
+                            setState(() {
+                              _chords.removeAt(_selectedChordIdx);
+                              _selectedChordIdx = -1;
+                              _selectedLine = -1;
+                            });
+                            _notifyChange();
+                          },
+                        ),
+                      ],
                     ],
                   ),
                 ),
               ],
             ),
           ),
-        // Área de letra
+        // Barra rapida de acordes: se toca una linea y luego un acorde.
+        if (!widget.readOnly)
+          ChordQuickBar(
+            songKey: widget.songKey,
+            selectedChord: _selectedChordIdx >= 0 && _selectedChordIdx < _chords.length ? _chords[_selectedChordIdx].chord : null,
+            lineNumber: _lineaDeInsercion >= 0 ? _lineaDeInsercion : null,
+            onPick: _insertarAcorde,
+            onManual: _pedirAcordeAMano,
+          ),
+        // Area de letra
         Expanded(
           child: ListView.builder(
             padding: const EdgeInsets.all(16),
@@ -266,8 +317,8 @@ class _VisualChordEditorState extends State<VisualChordEditor> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Número de línea (con badge de color en los encabezados
-                      // de sección, para que se lean igual que en la vista)
+                      // Numero de linea (con badge de color en los encabezados
+                      // de seccion, para que se lean igual que en la vista)
                       if (isHeader) ...[
                         HeaderBadge(line: line),
                         const SizedBox(width: 8),
@@ -280,7 +331,7 @@ class _VisualChordEditorState extends State<VisualChordEditor> {
                         child: _LyricLineWithChords(
                           line: line,
                           chords: lineChords,
-                          selectedIdx: _selectedChordIdx >= 0 && _chords[_selectedChordIdx].lineIndex == i ? _chords.indexOf(_chords[_selectedChordIdx]) : -1,
+                          selectedIdx: _selectedChordIdx >= 0 && _selectedChordIdx < _chords.length && _chords[_selectedChordIdx].lineIndex == i ? _chords.indexOf(_chords[_selectedChordIdx]) : -1,
                           style: mono,
                           onChordTap: (chordIdx) {
                             setState(() {
@@ -303,11 +354,12 @@ class _VisualChordEditorState extends State<VisualChordEditor> {
   }
 }
 
-/// Línea de letra con chips de acordes insertados en su posición visual.
+/// Linea de letra con chips de acordes insertados en su posicion visual.
+/// Cada chip lleva un margen para que dos acordes seguidos no se peguen.
 class _LyricLineWithChords extends StatelessWidget {
   final String line;
   final List<PositionedChord> chords;
-  final int selectedIdx; // índice dentro de `chords`
+  final int selectedIdx; // ndice dentro de `chords`
   final TextStyle style;
   final ValueChanged<int> onChordTap;
   const _LyricLineWithChords({required this.line, required this.chords, required this.selectedIdx, required this.style, required this.onChordTap});
@@ -327,16 +379,21 @@ class _LyricLineWithChords extends StatelessWidget {
       spans.add(WidgetSpan(
         alignment: PlaceholderAlignment.baseline,
         baseline: TextBaseline.alphabetic,
-        child: GestureDetector(
-          onTap: () => onChordTap(i),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-            decoration: BoxDecoration(
-              color: selectedIdx == i ? AppColors.accent : AppColors.primary,
-              borderRadius: BorderRadius.circular(4),
-              boxShadow: selectedIdx == i ? [BoxShadow(color: AppColors.accent.withValues(alpha: 0.5), blurRadius: 4)] : null,
+        child: Padding(
+          // Margen a los lados: as dos acordes seguidos se pueden separar y
+          // cada uno tiene su sitio para tocarlo.
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: GestureDetector(
+            onTap: () => onChordTap(i),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              decoration: BoxDecoration(
+                color: selectedIdx == i ? AppColors.accent : AppColors.primary,
+                borderRadius: BorderRadius.circular(4),
+                boxShadow: selectedIdx == i ? [BoxShadow(color: AppColors.accent.withValues(alpha: 0.5), blurRadius: 4)] : null,
+              ),
+              child: Text(c.chord, style: style.copyWith(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
             ),
-            child: Text(c.chord, style: style.copyWith(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
           ),
         ),
       ));
@@ -345,121 +402,4 @@ class _LyricLineWithChords extends StatelessWidget {
     if (last < line.length) spans.add(TextSpan(text: line.substring(last), style: style));
     return Text.rich(TextSpan(children: spans, style: style));
   }
-}
-
-/// Bottom sheet con acordes diatónicos + extensiones comunes.
-class _ChordPickerSheet extends StatelessWidget {
-  final String currentKey;
-  final String lyricLine;
-  final int charIndex;
-  final String? existingChord;
-  final ValueChanged<String> onPick;
-  final VoidCallback? onDelete;
-  const _ChordPickerSheet({required this.currentKey, required this.lyricLine, required this.charIndex, this.existingChord, required this.onPick, this.onDelete});
-
-  @override
-  Widget build(BuildContext context) {
-    final diatonic = diatonicChords(currentKey);
-    final firstChord = diatonic.isNotEmpty ? diatonic.first.symbol : currentKey;
-    final extensions = commonExtensions(firstChord);
-    final preview = lyricLine.length > charIndex ? lyricLine.substring(charIndex) : '';
-    final previewShort = preview.length > 20 ? '${preview.substring(0, 20)}…' : preview;
-
-    return DraggableScrollableSheet(
-      initialChildSize: 0.5,
-      minChildSize: 0.3,
-      maxChildSize: 0.9,
-      expand: false,
-      builder: (ctx, scrollCtrl) => Container(
-        padding: const EdgeInsets.all(16),
-        child: ListView(
-          controller: scrollCtrl,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.music_note, color: AppColors.primary),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text('Insertar acorde en "$previewShort"',
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-                ),
-                if (onDelete != null)
-                  TextButton.icon(icon: const Icon(Icons.delete, color: Colors.redAccent), label: const Text('Eliminar', style: TextStyle(color: Colors.redAccent)), onPressed: onDelete),
-              ],
-            ),
-            const Divider(),
-            // Acordes diatónicos
-            const Text('Acordes de la tonalidad', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final d in diatonic)
-                  _ChordChip(
-                    label: '${d.symbol} (${d.degree})',
-                    selected: existingChord == d.symbol,
-                    onTap: () => onPick(d.symbol),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            // Extensiones comunes
-            const Text('Extensiones comunes', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final ext in extensions)
-                  _ChordChip(label: ext, selected: existingChord == ext, onTap: () => onPick(ext)),
-              ],
-            ),
-            const SizedBox(height: 16),
-            // Entrada manual
-            const Text('Otro acorde', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-            const SizedBox(height: 8),
-            _ManualChordInput(onSubmit: onPick),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ChordChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  const _ChordChip({required this.label, required this.selected, required this.onTap});
-  @override
-  Widget build(BuildContext context) => FilterChip(
-        label: Text(label, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold)),
-        selected: selected,
-        onSelected: (_) => onTap(),
-        backgroundColor: AppColors.card,
-        selectedColor: AppColors.primary,
-        checkmarkColor: Colors.white,
-        labelStyle: TextStyle(color: selected ? Colors.white : Colors.white),
-      );
-}
-
-class _ManualChordInput extends StatefulWidget {
-  final ValueChanged<String> onSubmit;
-  const _ManualChordInput({required this.onSubmit});
-  @override
-  State<_ManualChordInput> createState() => _ManualChordInputState();
-}
-
-class _ManualChordInputState extends State<_ManualChordInput> {
-  final _ctrl = TextEditingController();
-  @override
-  Widget build(BuildContext context) => Row(
-        children: [
-          Expanded(child: TextField(controller: _ctrl, decoration: const InputDecoration(hintText: 'Ej: Bm7, F#sus4...'), onSubmitted: (v) { if (v.trim().isNotEmpty) widget.onSubmit(v.trim()); })),
-          const SizedBox(width: 8),
-          FilledButton(onPressed: () { if (_ctrl.text.trim().isNotEmpty) widget.onSubmit(_ctrl.text.trim()); }, child: const Text('Añadir')),
-        ],
-      );
 }

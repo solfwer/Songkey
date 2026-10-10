@@ -502,3 +502,31 @@ List<String> commonExtensions(String baseChord) {
   if (!isMinor) ext.add('${root}maj7');
   return ext;
 }
+/// Nota razon de un acorde, sin calidad ("Em" -> "E", "Bdim" -> "B").
+String chordRootOf(String symbol) => symbol.replaceAll(RegExp(r'(m|dim|M|sus|add|maj|aug).*'), '').trim();
+
+/// Inversiones habituales de la tonalidad: la tonica con su tercera y su
+/// quinta en el bajo, y la dominante con la septima. Para C mayor da
+/// C/E, C/G y G/B, que son las que mas se usan.
+List<String> slashChords(String key) {
+  final d = diatonicChords(key);
+  if (d.length < 7) return [];
+  final tonic = d[0].symbol;
+  final dominant = d[4].symbol;
+  final third = chordRootOf(d[2].symbol);
+  final fifth = chordRootOf(d[4].symbol);
+  final seventh = chordRootOf(d[6].symbol);
+  return ['$tonic/$third', '$tonic/$fifth', '$dominant/$seventh'];
+}
+
+/// Los tres grupos de la barra rapida de acordes:
+///  * scale: los acordes de la tonalidad (no hay que saberselos).
+///  * slash: inversiones habituales.
+///  * variants: variantes del acorde marcado (o de la tonica).
+({List<String> scale, List<String> slash, List<String> variants}) quickBarChords(String key, {String? selected}) {
+  final d = diatonicChords(key);
+  final scale = [for (final c in d) c.symbol];
+  final slash = slashChords(key);
+  final base = (selected == null || selected.trim().isEmpty) ? (scale.isNotEmpty ? scale.first : key) : selected.trim();
+  return (scale: scale, slash: slash, variants: commonExtensions(base));
+}
