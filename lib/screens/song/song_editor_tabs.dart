@@ -9,6 +9,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../data/chord_parser.dart';
+import '../../../data/chordpro.dart';
 import '../../../data/store.dart';
 import 'widgets/song_view.dart';
 import 'widgets/visual_chord_editor.dart';
@@ -30,6 +31,50 @@ class _ContentTabState extends State<ContentTab> {
   /// ltimo modo usado: se recuerda entre aperturas del editor.
   late bool _visualMode = widget.store.editorVisualMode;
 
+  /// Cambio de modo. Si el texto ChordPro tiene errores, se avisa con el
+  /// nmero de lnea y se deja elegir: quedarse en ChordPro o seguir (lo que no
+  /// se entienda se descarta, pero nada se pierde en silencio).
+  Future<void> _changeMode(bool visual) async {
+    if (visual == _visualMode) return;
+    if (visual) {
+      final parser = ChordProParser()..parse(widget.body.text);
+      if (parser.issues.isNotEmpty) {
+        final seguir = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('El texto tiene cosas que no se entienden'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('En el editor visual estas partes se van a descartar:', style: TextStyle(fontSize: 13)),
+                const SizedBox(height: 8),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      for (final issue in parser.issues.take(8))
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Text('Lnea ${issue.line}: ${issue.message}', style: const TextStyle(fontSize: 12, color: Colors.orangeAccent)),
+                        ),
+                    ],
+                  ),
+                ),
+              ]),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Quedarme en ChordPro')),
+              FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Continuar')),
+            ],
+          ),
+        );
+        if (seguir != true) return;
+      }
+    }
+    setState(() => _visualMode = visual);
+    widget.store.setEditorVisualMode(visual);
+  }
+
   @override
   Widget build(BuildContext context) {
     final wide = MediaQuery.of(context).size.width >= 700;
@@ -46,10 +91,7 @@ class _ContentTabState extends State<ContentTab> {
             ],
             selected: {_visualMode},
             showSelectedIcon: false,
-            onSelectionChanged: (v) {
-              setState(() => _visualMode = v.first);
-              widget.store.setEditorVisualMode(v.first);
-            },
+            onSelectionChanged: (v) => _changeMode(v.first),
           ),
         ),
       ),

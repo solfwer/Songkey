@@ -7,6 +7,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/chord_parser.dart';
+import '../../data/chordpro.dart';
 import '../../data/format.dart';
 import '../../data/store.dart';
 import '../../models/app_state.dart';
@@ -51,6 +52,22 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
   /// edita en la pestaa Texto o se importa un PDF.
   int _visualRev = 0;
 
+  /// Al abrir el editor, los metadatos que ya estn como directivas en el
+  /// cuerpo rellenan la pestaña Datos (y as no se duplican ni se pierden).
+  void _syncMetaFromBody() {
+    final meta = ChordProParser().parse(body.text).meta;
+    void fill(TextEditingController c, String? value) {
+      if (c.text.trim().isNotEmpty) return;
+      if (value == null || value.trim().isEmpty) return;
+      c.text = value.trim();
+    }
+
+    fill(title, meta.title);
+    fill(author, meta.artist);
+    fill(key, meta.key);
+    fill(bpm, meta.tempo);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -61,6 +78,8 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
     style = TextEditingController(text: widget.song?.style ?? '');
     duration = TextEditingController(text: _durationLabel(widget.song?.durationSec));
     body = TextEditingController(text: widget.song?.body ?? widget.initialBody ?? '');
+    // Canciones antiguas sin author/bpm guardados: se sacan de las directivas.
+    if (widget.song != null) _syncMetaFromBody();
     groupId = widget.song?.groupId ?? widget.initialGroupId;
     _structure = widget.song?.structure?.toList();
     _tabCtrl = TabController(length: 4, vsync: this);
@@ -172,14 +191,26 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
   void save() {
     if (title.text.trim().isEmpty) return;
     final id = widget.song?.id ?? uid();
+    // El cuerpo se guarda SIEMPRE en el formato cannica: los metadatos de la
+    // pestaa Datos se escriben como directivas al principio del texto.
+    final parsed = ChordProParser().parse(body.text);
+    parsed.meta.title = title.text.trim();
+    final authorText = author.text.trim();
+    parsed.meta.artist = authorText.isEmpty ? null : authorText;
+    final keyText = key.text.trim();
+    parsed.meta.key = keyText.isEmpty ? null : keyText;
+    final bpmText = bpm.text.trim();
+    parsed.meta.tempo = bpmText.isEmpty ? null : bpmText;
+    final bodyCanonico = const ChordProSerializer().write(parsed);
+
     final song = Song(
       id: id,
       title: title.text.trim(),
-      author: author.text.trim().isEmpty ? null : author.text.trim(),
-      key: key.text.trim().isEmpty ? 'C' : key.text.trim(),
-      bpm: int.tryParse(bpm.text),
+      author: authorText.isEmpty ? null : authorText,
+      key: keyText.isEmpty ? 'C' : keyText,
+      bpm: int.tryParse(bpmText),
       groupId: groupId,
-      body: body.text,
+      body: bodyCanonico,
       style: style.text.trim().isEmpty ? null : style.text.trim(),
       durationSec: parseDuration(duration.text),
       lastOpenedAt: widget.song?.lastOpenedAt,

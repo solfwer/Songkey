@@ -468,6 +468,19 @@ class ChordProParser {
         continue;
       }
 
+      // 5b) Errores de sintaxis que s se pueden detectar (se avisan, no se
+      // ocultan): corchetes sin cerrar y directivas que no se conocen.
+      if (line.contains('[') && line.split('[').length != line.split(']').length) {
+        issues.add(ChordProParseIssue(i + 1, 'Hay un corchete sin cerrar: $line'));
+      }
+      if (line.startsWith('{') && line.endsWith('}') && !_meta.hasMatch(line) && !_comment.hasMatch(line)) {
+        final w = _directiveLine.firstMatch(line)?.group(1) ?? '';
+        if (w.isNotEmpty && resolveSectionWord(w) == null && !isCloseWord(w)) {
+          issues.add(ChordProParseIssue(i + 1, 'Directiva desconocida: {$w}'));
+          continue;
+        }
+      }
+
       // 6) Lnea de contenido.
       var sec = current;
       if (sec == null) {
