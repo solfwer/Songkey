@@ -197,6 +197,9 @@ const List<KindRule> defaultKindRules = [
 const Map<String, String> canonicalDirectives = {
   'intro': 'introduccion',
   'introduccion': 'introduccion',
+  // erratas habituales del cancionero (le falta la O)
+  'intruduccion': 'introduccion',
+  'introduccin': 'introduccion',
   'presentacion': 'introduccion',
   'verse': 'verse',
   'verso': 'verse',
@@ -357,7 +360,7 @@ class ChordProParser {
 
   /// Encabezado en texto libre, con su contenido opcional detrs.
   final _headerStart = RegExp(
-    r'^\s*[\[\(\{]?\s*(INTRODUCCI[OÓ]N|INTRO|VERSO|ESTROFA|CORO|ESTRIBILLO|PRECORO|PRE-?CORO|PUENTE|BRIDGE|FINAL|TAG|OUTRO|INTERLUDIO|INSTRUMENTAL|TRANSICI[OÓ]N|PRESENTACI[OÓ]N)\s*(\d*)\s*[\]\)\}]?\s*:?\s*(.*)$',
+    r'^\s*[\[\(\{]?\s*(INTR[A-ZÁÉÍÓÚÜÑ]{0,6}CCI[OÓ]N|INTRO|VERSO|ESTROFA|CORO|ESTRIBILLO|PRECORO|PRE-?CORO|PUENTE|BRIDGE|FINAL|TAG|OUTRO|INTERLUDIO|INSTRUMENTAL|TRANSICI[OÓ]N|PRESENTACI[OÓ]N)\s*(\d*)\s*[\]\)\}]?\s*:?\s*(.*)$',
     caseSensitive: false,
   );
 
@@ -450,7 +453,10 @@ class ChordProParser {
           current = sec;
           sections.add(sec);
         }
-        sec.lines.add(CpLine.lyricLine(inside));
+        // No es un encabezado: se conserva como letra, pero parseando sus
+        // acordes (si no, los corchetes se quedarian como texto).
+        final parsedComment = parseLine(inside);
+        if (parsedComment != null) sec.lines.add(parsedComment);
         continue;
       }
 
@@ -571,7 +577,7 @@ class ChordProParser {
       for (var i = 0; i < loose.length; i++) {
         final l = loose[i];
         final removed = l.to - l.from;
-        final shift = l.from - i * removed;
+        final shift = (l.from - i * removed).clamp(0, text.length);
         final target = _nextSyllableStart(text, shift) ?? text.length;
         chords.add(CpChord(target.clamp(0, text.length), l.chord));
       }
@@ -582,7 +588,9 @@ class ChordProParser {
     final normalized = _normalizeSpaces(text, chords);
 
     final trimmed = normalized.text.trimRight();
-    final kept = normalized.chords.where((c) => c.at <= trimmed.length).toList();
+    // Los acordes que quedaran fuera del texto recortado se anclan al final
+    // (pasaba con los acordes que iban detrs de la ltima slaba).
+    final kept = normalized.chords.map((c) => CpChord(c.at.clamp(0, trimmed.length), c.chord)).toList();
     if (trimmed.isEmpty && kept.isEmpty) return null;
     return CpLine.lyricLine(trimmed, kept);
   }
@@ -603,7 +611,8 @@ class ChordProParser {
 
   /// ndice del primer carcter no espacio a partir de [from] (o null).
   static int? _nextSyllableStart(String text, int from) {
-    for (var i = from; i < text.length; i++) {
+    final start = from < 0 ? 0 : from;
+    for (var i = start; i < text.length; i++) {
       if (text[i].trim().isNotEmpty) return i;
     }
     return null;
@@ -712,11 +721,18 @@ class ChordProSerializer {
     final lyric = line.lyric ?? '';
     if (line.chords.isEmpty) return lyric;
     // Se insertan de derecha a izquierda para no desplazar las posiciones.
-    final sorted = line.chords.toList()..sort((a, b) => b.at.compareTo(a.at));
+    // A igual posicin se respeta el orden original (sort estable a mano).
+    final marked = <({int i, CpChord c})>[
+      for (var i = 0; i < line.chords.length; i++) (i: i, c: line.chords[i]),
+    ];
+    marked.sort((a, b) {
+      final byPos = b.c.at.compareTo(a.c.at);
+      return byPos != 0 ? byPos : b.i.compareTo(a.i);
+    });
     var out = lyric;
-    for (final c in sorted) {
-      final at = c.at.clamp(0, out.length);
-      out = '${out.substring(0, at)}[${c.chord}]${out.substring(at)}';
+    for (final m in marked) {
+      final at = m.c.at.clamp(0, out.length);
+      out = '${out.substring(0, at)}[${m.c.chord}]${out.substring(at)}';
     }
     return out;
   }
