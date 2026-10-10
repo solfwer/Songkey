@@ -122,14 +122,14 @@ class SongLineView extends StatelessWidget {
   /// es una "progresión" (intro, interludio) y se pinta en una sola fila.
   bool get _isChordRow {
     if (line.isEmpty) return false;
-    final sep = RegExp(r'^[\s|\-–—/·]*$');
+    final sep = RegExp(r'^[\s|/|.-]*$');
     return line.every((s) => s.chord != null && sep.hasMatch(s.text));
   }
 
   @override
   Widget build(BuildContext context) {
+    // En modo "solo letra" las progresiones de acordes no aportan nada.
     if (lyricsOnly) {
-      // En modo "solo letra" las progresiones de acordes no aportan nada.
       if (_isChordRow) return const SizedBox.shrink();
       return Text(
         line.map((x) => x.text).join().replaceAll(RegExp(r'\s+'), ' ').trim(),
@@ -239,65 +239,10 @@ class SongBodyList extends StatelessWidget {
 /// (`[C#m] | [A] | [E] | [B]`, `G  C  D`...).
 bool isChordRowLine(SongLine line) {
   if (line.isEmpty) return false;
-  final sep = RegExp(r'^[\s|\-–—/·]*$');
+  final sep = RegExp(r'^[\s|/|.-]*$');
   return line.every((s) => s.chord != null && sep.hasMatch(s.text));
 }
 
-/// Vista compacta: cada sección UNA sola vez, con `(x2)` si suena varias
-/// veces. Es la que se usa en tarjetas y previsualizaciones; la pantalla de
-/// la canción sigue mostrando el orden real de toque con las repeticiones.
-class CompactSongView extends StatelessWidget {
-  /// Secciones ya en orden de toque (con repeticiones incluidas).
-  final List<Section> sections;
-  final bool lyricsOnly;
-  final int semitones;
-  final double fontSize;
-  final bool american;
-  final int maxLinesPerSection;
-  const CompactSongView({
-    super.key,
-    required this.sections,
-    required this.lyricsOnly,
-    required this.semitones,
-    required this.fontSize,
-    this.american = true,
-    this.maxLinesPerSection = 3,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final counts = <String, int>{};
-    final unique = <Section>[];
-    for (final s in sections) {
-      counts[s.label] = (counts[s.label] ?? 0) + 1;
-      if (counts[s.label] == 1) unique.add(s);
-    }
-    if (unique.isEmpty) return const SizedBox.shrink();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (final sec in unique) ...[
-          SectionHeader(sec: sec, fontSize: (fontSize * 0.7).clamp(8.0, 12.0), gap: 6),
-          if ((counts[sec.label] ?? 1) > 1)
-            Padding(
-              padding: const EdgeInsets.only(left: 2, bottom: 2),
-              child: Text('(x${counts[sec.label]})', style: TextStyle(fontSize: fontSize * 0.7, color: Colors.white54, fontStyle: FontStyle.italic)),
-            ),
-          const SizedBox(height: 2),
-          for (final line in sec.lines.take(maxLinesPerSection))
-            if (line.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 0.5),
-                child: SongLineView(line: line, lyricsOnly: lyricsOnly, semitones: semitones, fontSize: fontSize * 0.85, american: american, lineHeight: 1.2, chordLineHeight: 1.0),
-              ),
-          if (sec.lines.length > maxLinesPerSection)
-            Text('+ ${sec.lines.length - maxLinesPerSection} líneas', style: TextStyle(fontSize: fontSize * 0.7, color: Colors.white38)),
-          const SizedBox(height: 8),
-        ],
-      ],
-    );
-  }
-}
 
 /// Una "pgina" ya distribuida en columnas con el tamao elegido.
 typedef SongPage = ({List<List<Section>> columns, double fontSize});

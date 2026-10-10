@@ -103,7 +103,7 @@ class _ContentTabState extends State<ContentTab> {
                 songKey: widget.songKey.text,
                 onChanged: widget.onVisualChanged,
               )
-            : _ChordProEditor(controller: widget.body, wide: wide),
+            : ChordProEditor(controller: widget.body, wide: wide),
       ),
       // Guardar funciona igual en los dos modos.
       SafeArea(
@@ -123,22 +123,26 @@ class _ContentTabState extends State<ContentTab> {
 
 /// Editor de texto ChordPro con la sintaxis resaltada: directivas en amarillo,
 /// acordes en azul y encabezados de seccin en naranja.
-class _ChordProEditor extends StatefulWidget {
+class ChordProEditor extends StatefulWidget {
   final TextEditingController controller;
   final bool wide;
-  const _ChordProEditor({required this.controller, required this.wide});
+
+  /// Numeros de linea (1-based) que se resaltan con fondo naranja para que
+  /// el usuario vea de un vistazo lo que tiene que revisar.
+  final Set<int> warningLines;
+  const ChordProEditor({super.key, required this.controller, required this.wide, this.warningLines = const {}});
 
   @override
-  State<_ChordProEditor> createState() => _ChordProEditorState();
+  State<ChordProEditor> createState() => _ChordProEditorState();
 }
 
-class _ChordProEditorState extends State<_ChordProEditor> {
-  late final _SyntaxController _local;
+class _ChordProEditorState extends State<ChordProEditor> {
+  late final ChordSyntaxController _local;
 
   @override
   void initState() {
     super.initState();
-    _local = _SyntaxController(text: widget.controller.text);
+    _local = ChordSyntaxController(text: widget.controller.text)..warningLines = widget.warningLines;
     _local.addListener(_push);
     widget.controller.addListener(_pull);
   }
@@ -152,6 +156,17 @@ class _ChordProEditorState extends State<_ChordProEditor> {
   }
 
   bool _pushing = false;
+
+  @override
+  void didUpdateWidget(covariant ChordProEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_mismoSet(oldWidget.warningLines, widget.warningLines)) {
+      _local.warningLines = widget.warningLines;
+      setState(() {});
+    }
+  }
+
+  bool _mismoSet(Set<int> a, Set<int> b) => a.length == b.length && a.containsAll(b);
 
   void _push() {
     _pushing = true;
@@ -212,53 +227,60 @@ const _colorChord = Color(0xFF5AD1E6); // [C#m]
 const _colorHeader = Color(0xFFE5606B); // VERSO 1 (encabezado en texto plano)
 
 /// Controlador que pinta el texto con la sintaxis ChordPro resaltada.
-class _SyntaxController extends TextEditingController {
-  _SyntaxController({super.text});
+class ChordSyntaxController extends TextEditingController {
+  /// Lineas (1-based) que se pintan con fondo de aviso.
+  Set<int> warningLines = const {};
+  ChordSyntaxController({super.text});
 
   @override
   TextSpan buildTextSpan({required BuildContext context, TextStyle? style, required bool withComposing}) {
-    return TextSpan(style: style, children: _spansFor(text));
+    return TextSpan(style: style, children: chordSyntaxSpans(text, warningLines: warningLines));
   }
 }
 
-List<TextSpan> _spansFor(String text) {
+/// Convierte el texto en spans coloreados: directivas en amarillo, acordes en
+/// azul, encabezados de seccion en rojo. Las lineas de [warningLines] llevan
+/// fondo naranja para que se vea lo que hay que revisar.
+List<TextSpan> chordSyntaxSpans(String text, {Set<int> warningLines = const {}}) {
+  final lines = text.split('\n');
   final out = <TextSpan>[];
+  for (var i = 0; i < lines.length; i++) {
+    if (i > 0) out.add(const TextSpan(text: '\n'));
+    final fondoAviso = warningLines.contains(i + 1) ? const Color(0x55FFB300) : null;
+    out.addAll(_spansDeLinea(lines[i], fondoAviso));
+  }
+  return out;
+}
+
+/// Spans de una linea suelta.
+List<TextSpan> _spansDeLinea(String line, Color? fondo) {
+  final spans = <TextSpan>[];
   final re = RegExp(r'(\{[^{}]*\})|(\[[^\[\]]*\])');
   var last = 0;
-  for (final m in re.allMatches(text)) {
-    if (m.start > last) {
-      out.addAll(_plainSpans(text.substring(last, m.start)));
-    }
-    final isDirective = m.group(1) != null;
-    out.add(TextSpan(
+  for (final m in re.allMatches(line)) {
+    if (m.start > last) spans.add(_spanTexto(line.substring(last, m.start), fondo));
+    final esDirectiva = m.group(1) != null;
+    spans.add(TextSpan(
       text: m.group(0),
       style: TextStyle(
-        color: isDirective ? _colorDirective : _colorChord,
+        color: esDirectiva ? _colorDirective : _colorChord,
         fontWeight: FontWeight.bold,
+        backgroundColor: fondo,
       ),
     ));
     last = m.end;
   }
-  if (last < text.length) out.addAll(_plainSpans(text.substring(last)));
-  return out;
+  if (last < line.length) spans.add(_spanTexto(line.substring(last), fondo));
+  return spans;
 }
 
-/// Texto normal, resaltando las lneas que son encabezados de seccin.
-List<TextSpan> _plainSpans(String text) {
-  final lines = text.split('\n');
-  return [
-    for (var i = 0; i < lines.length; i++) ...[
-      if (i > 0) const TextSpan(text: '\n'),
-      TextSpan(
-        text: lines[i],
-        style: isSectionHeader(lines[i])
-            ? const TextStyle(color: _colorHeader, fontWeight: FontWeight.bold, letterSpacing: 1.2)
-            : null,
-      ),
-    ],
-  ];
+/// Texto sin acordes: si la linea entera es un encabezado, se pone en rojo.
+TextSpan _spanTexto(String t, Color? fondo) {
+  if (isSectionHeader(t)) {
+    return TextSpan(text: t, style: TextStyle(color: _colorHeader, fontWeight: FontWeight.bold, letterSpacing: 1.2, backgroundColor: fondo));
+  }
+  return TextSpan(text: t, style: TextStyle(backgroundColor: fondo));
 }
-
 /// Vista previa en vivo de la pestaa "Contenido" (pantalla ancha).
 class _LivePreview extends StatelessWidget {
   final String text;

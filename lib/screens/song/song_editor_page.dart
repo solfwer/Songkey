@@ -159,7 +159,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
                 Expanded(child: TextField(controller: duration, decoration: const InputDecoration(labelText: 'Duración (3:45)'), keyboardType: TextInputType.text)),
               ]),
               const SizedBox(height: 24),
-              PdfImportButton(titleController: title, bodyController: body, onImported: () => setState(() {})),
+              PdfImportButton(store: widget.store, initialGroupId: groupId),
               const SizedBox(height: 12),
               FilledButton(onPressed: save, child: const Text('Guardar')),
             ]),

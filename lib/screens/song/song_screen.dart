@@ -12,6 +12,7 @@ import '../../data/store.dart';
 import '../../models/app_state.dart';
 import '../../models/song.dart';
 import 'song_editor_page.dart';
+import 'widgets/compact_song_view.dart';
 import 'widgets/song_view.dart';
 import 'widgets/view_options_panel.dart';
 
@@ -273,23 +274,30 @@ class _SongPageState extends State<_SongPage> {
         verticalPadding: 4,
       ),
       Expanded(
-        child: widget.config.autoFit
-            ? AutoFitSongBody(
-                sections: sections,
+        child: widget.store.compactView
+            ? CompactSongView(
+                song: widget.song,
                 lyricsOnly: widget.config.lyricsOnly,
                 semitones: widget.config.shiftFor(widget.song.id),
                 american: widget.config.americanNotation,
-                maxFontSize: widget.config.fontSize,
               )
-            : SongBodyList(
-                sections: sections,
-                lyricsOnly: widget.config.lyricsOnly,
-                semitones: widget.config.shiftFor(widget.song.id),
-                fontSize: widget.config.fontSize,
-                american: widget.config.americanNotation,
-                controller: _scrollController,
-                sectionKeys: _sectionKeys,
-              ),
+            : widget.config.autoFit
+                ? AutoFitSongBody(
+                    sections: sections,
+                    lyricsOnly: widget.config.lyricsOnly,
+                    semitones: widget.config.shiftFor(widget.song.id),
+                    american: widget.config.americanNotation,
+                    maxFontSize: widget.config.fontSize,
+                  )
+                : SongBodyList(
+                    sections: sections,
+                    lyricsOnly: widget.config.lyricsOnly,
+                    semitones: widget.config.shiftFor(widget.song.id),
+                    fontSize: widget.config.fontSize,
+                    american: widget.config.americanNotation,
+                    controller: _scrollController,
+                    sectionKeys: _sectionKeys,
+                  ),
       ),
     ]);
   }

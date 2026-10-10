@@ -158,7 +158,9 @@ class ChordProSong {
   /// Es informacin de la interfaz, no del texto.
   List<({int section, int repeat})>? order;
 
-  ChordProSong({CpMeta? meta, this.sections = const [], this.order}) : meta = meta ?? CpMeta();
+  ChordProSong({CpMeta? meta, List<CpSection>? sections, this.order})
+      : meta = meta ?? CpMeta(),
+        sections = sections ?? <CpSection>[];
 
   ChordProSong copy() => ChordProSong(
         meta: meta.copy(),

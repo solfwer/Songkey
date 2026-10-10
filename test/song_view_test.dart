@@ -1,6 +1,8 @@
-// Tests de las vistas de cancin: compacta (seccin nica con "(x2)") y
+// Tests de las vistas de cancin: compacta (seccin nica con contador) y
 // auto-ajuste (elige tamao/columnas, o reparte en pginas si no cabe).
 import 'package:appchords/data/chord_parser.dart';
+import 'package:appchords/models/song.dart';
+import 'package:appchords/screens/song/widgets/compact_song_view.dart';
 import 'package:appchords/screens/song/widgets/song_view.dart';
 import 'package:appchords/screens/song/widgets/view_options_panel.dart';
 import 'package:flutter/material.dart';
@@ -24,25 +26,33 @@ void main() {
     expect(config.shiftFor('cancion-b'), -1);
   });
 
-  testWidgets('vista compacta muestra cada seccion una sola vez con su contador', (tester) async {
-    final secs = sectionsInOrder('Coro\n[C]Aleluya\n\nVerso 1\n[G]Algo\n', ['Coro', 'Verso 1', 'Coro']);
-    expect(secs.length, 3);
+  testWidgets('vista compacta: cada seccion una sola vez con su contador', (tester) async {
+    tester.view.physicalSize = const Size(400, 1500);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
 
+    const body = '{start_of_verse: VERSO 1}\n[G]Una linea del verso\n{end_of_verse}\n{start_of_chorus: CORO}\n[C]Aleluya al Senor\n{end_of_chorus}';
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
         body: SingleChildScrollView(
-          child: CompactSongView(sections: secs, lyricsOnly: false, semitones: 0, fontSize: 14),
+          child: CompactSongView(
+            song: Song(id: 's1', title: 'T', body: body, structure: const ['CORO', 'VERSO 1', 'CORO']),
+            lyricsOnly: false,
+            semitones: 0,
+          ),
         ),
       ),
     ));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(find.text('(x2)'), findsOneWidget);
-    // El encabezado se pinta en maysculas.
+    // El coro sale una sola vez, con su "x2".
     expect(find.text('CORO'), findsOneWidget);
+    expect(find.text('x2'), findsOneWidget);
+    expect(find.text('VERSO 1'), findsOneWidget);
   });
 
-  testWidgets('auto-ajuste: cancion corta cabe en una sola pagina', (tester) async {
+  testWidgets('auto-ajuste: cancin corta cabe en una sola pagina', (tester) async {
     tester.view.physicalSize = const Size(400, 700);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);

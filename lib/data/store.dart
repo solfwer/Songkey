@@ -25,6 +25,9 @@ class Store extends ChangeNotifier {
   /// Modo del editor de contenido: true = visual, false = ChordPro.
   bool editorVisualMode = true;
 
+  /// Vista compacta: secciones nicas una sola vez (sin repeticiones).
+  bool compactView = false;
+
   bool get hasAccount => username.isNotEmpty && _password.isNotEmpty;
 
   Future<void> load() async {
@@ -45,6 +48,7 @@ class Store extends ChangeNotifier {
     americanNotation = prefs.getBool('songkey-american') ?? true;
     defaultLyricsOnly = prefs.getBool('songkey-lyricsonly') ?? false;
     editorVisualMode = prefs.getBool('songkey-editorvisual') ?? true;
+    compactView = prefs.getBool('songkey-compact') ?? false;
     notifyListeners();
   }
 
@@ -110,6 +114,13 @@ class Store extends ChangeNotifier {
   void setEditorVisualMode(bool visual) {
     editorVisualMode = visual;
     SharedPreferences.getInstance().then((p) => p.setBool('songkey-editorvisual', visual));
+    notifyListeners();
+  }
+
+  /// Vista compacta: secciones nicas, sin repetir el contenido.
+  void setCompactView(bool v) {
+    compactView = v;
+    SharedPreferences.getInstance().then((p) => p.setBool('songkey-compact', v));
     notifyListeners();
   }
 

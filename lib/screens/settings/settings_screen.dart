@@ -58,6 +58,12 @@ class SettingsScreen extends StatelessWidget {
         const Divider(),
         const ListTile(title: Text('Preferencias', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
         SwitchListTile(
+          title: const Text('Vista compacta'),
+          subtitle: const Text('Cuando esté habilitado, las secciones se mostrarán en un diseño condensado, ignorando la estructura original de la canción'),
+          value: prefs.compactView,
+          onChanged: (v) => prefs.setCompactView(v),
+        ),
+        SwitchListTile(
           title: const Text('Notación americana'),
           subtitle: const Text('Acordes como C, G, Am — apaga para Do, Sol, Lam'),
           value: prefs.americanNotation,
