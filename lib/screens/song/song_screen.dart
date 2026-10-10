@@ -106,7 +106,12 @@ class _SongScreenState extends State<SongScreen> {
       appBar: AppBar(
         title: Text(displayed.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17)),
         actions: [
-          _KeySelector(song: displayed, value: config.semitones == 0 ? null : sharpen(transposeChord(displayed.key, config.semitones)), american: config.americanNotation, onSelected: (k) => setState(() => config.semitones = semitoneShift(displayed.key, k))),
+          _KeySelector(
+            song: displayed,
+            value: config.shiftFor(displayed.id) == 0 ? null : sharpen(transposeChord(displayed.key, config.shiftFor(displayed.id))),
+            american: config.americanNotation,
+            onSelected: (k) => setState(() => config.setShift(displayed.id, semitoneShift(displayed.key, k))),
+          ),
           IconButton(icon: const Icon(Icons.tune), tooltip: 'Opciones de vista', onPressed: () => _scaffoldKey.currentState?.openEndDrawer()),
         ],
       ),
@@ -191,7 +196,7 @@ class _SongPageState extends State<_SongPage> {
   }
 
   String _displayedKey() =>
-      notateChord(sharpen(transposeChord(widget.song.key, widget.config.semitones)), american: widget.config.americanNotation);
+      notateChord(sharpen(transposeChord(widget.song.key, widget.config.shiftFor(widget.song.id))), american: widget.config.americanNotation);
 
   String _metaLine() {
     final group = widget.store.state.groups.where((g) => g.id == widget.song.groupId).map((g) => g.name).firstOrNull;
@@ -247,6 +252,18 @@ class _SongPageState extends State<_SongPage> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         child: Text(_metaLine(), textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
       ),
+      // Mapa de la canción: una ficha por aparición, con el contador de
+      // repeticiones; al tocar una se salta a ella.
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+        child: Row(children: [
+          Flexible(
+            child: Text('MAPA DE LA CANCIÓN', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 9, letterSpacing: 1.5, color: Colors.grey.shade600, fontWeight: FontWeight.bold)),
+          ),
+          const SizedBox(width: 8),
+          Text('${sections.length} partes', maxLines: 1, style: TextStyle(fontSize: 9, color: Colors.grey.shade600)),
+        ]),
+      ),
       SectionChips(
         sections: sections,
         alphaOf: (_) => 0.25,
@@ -256,15 +273,23 @@ class _SongPageState extends State<_SongPage> {
         verticalPadding: 4,
       ),
       Expanded(
-        child: SongBodyList(
-          sections: sections,
-          lyricsOnly: widget.config.lyricsOnly,
-          semitones: widget.config.semitones,
-          fontSize: widget.config.fontSize,
-          american: widget.config.americanNotation,
-          controller: _scrollController,
-          sectionKeys: _sectionKeys,
-        ),
+        child: widget.config.autoFit
+            ? AutoFitSongBody(
+                sections: sections,
+                lyricsOnly: widget.config.lyricsOnly,
+                semitones: widget.config.shiftFor(widget.song.id),
+                american: widget.config.americanNotation,
+                maxFontSize: widget.config.fontSize,
+              )
+            : SongBodyList(
+                sections: sections,
+                lyricsOnly: widget.config.lyricsOnly,
+                semitones: widget.config.shiftFor(widget.song.id),
+                fontSize: widget.config.fontSize,
+                american: widget.config.americanNotation,
+                controller: _scrollController,
+                sectionKeys: _sectionKeys,
+              ),
       ),
     ]);
   }

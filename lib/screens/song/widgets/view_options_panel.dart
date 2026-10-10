@@ -10,13 +10,27 @@ import '../../../theme.dart';
 
 /// Estado ajustable de la vista de canción (vive en el estado de la pantalla).
 class SongViewConfig {
-  int semitones = 0;
   double fontSize;
   bool lyricsOnly;
 
+  /// Auto-ajuste: baja el tamaño de letra y usa hasta 3 columnas para que la
+  /// canción entera quepa en pantalla; si no cabe, la reparte en páginas.
+  bool autoFit = false;
+
   /// true = notación americana (C, G, Am); false = latina (Do, Sol, Lam).
   bool americanNotation;
+
+  /// Transposición (en semitonos) elegida para cada canción. Se guarda por id
+  /// de canción para que al cambiar el tono dentro de un setlist solo se
+  /// mueva esa canción y las demás se queden en su tono original.
+  final Map<String, int> _shiftBySong = {};
+
   SongViewConfig({required this.fontSize, this.lyricsOnly = false, this.americanNotation = true});
+
+  /// Semitonos de transposición de una canción (0 = su tono original).
+  int shiftFor(String songId) => _shiftBySong[songId] ?? 0;
+
+  void setShift(String songId, int semitones) => _shiftBySong[songId] = semitones;
 }
 
 class ViewOptionsPanel extends StatelessWidget {
@@ -118,29 +132,48 @@ class ViewOptionsPanel extends StatelessWidget {
           ]),
           _panelLabel('Tamaño de letra'),
           _panelCard([
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-              child: Column(children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 2,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    const Icon(Icons.format_size, size: 20),
-                    const Text('Tamaño de fuente'),
-                    Text('${config.fontSize.round()}px', style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.accent)),
-                  ],
-                ),
-                Slider(value: config.fontSize, min: 12, max: 34, divisions: 22, label: config.fontSize.round().toString(), onChanged: (v) {
-                  config.fontSize = v;
-                  onChanged();
-                }),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('Vista previa: AaGg', style: TextStyle(fontSize: config.fontSize.clamp(14.0, 24.0), color: AppColors.primary, fontWeight: FontWeight.bold)),
-                ),
-              ]),
+            SwitchListTile(
+              secondary: const Icon(Icons.fit_screen, color: AppColors.accent),
+              title: const Text('Ajuste automático'),
+              subtitle: const Text('Baja el tamaño y usa columnas hasta que la canción completa quepa en pantalla'),
+              value: config.autoFit,
+              onChanged: (v) {
+                config.autoFit = v;
+                onChanged();
+              },
             ),
+            if (!config.autoFit)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+                child: Column(children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 2,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      const Icon(Icons.format_size, size: 20),
+                      const Text('Tamaño de fuente'),
+                      Text('${config.fontSize.round()}px', style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.accent)),
+                    ],
+                  ),
+                  Slider(value: config.fontSize, min: 12, max: 34, divisions: 22, label: config.fontSize.round().toString(), onChanged: (v) {
+                    config.fontSize = v;
+                    onChanged();
+                  }),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('Vista previa: AaGg', style: TextStyle(fontSize: config.fontSize.clamp(14.0, 24.0), color: AppColors.primary, fontWeight: FontWeight.bold)),
+                  ),
+                ]),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Ajuste automático activo: tamaño máximo ${config.fontSize.round()}px, mínimo 11px.', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                ),
+              ),
           ]),
           _panelLabel('Compartir y exportar'),
           _panelCard([
@@ -150,7 +183,7 @@ class ViewOptionsPanel extends StatelessWidget {
               subtitle: const Text('Texto con acordes en el tono actual'),
               onTap: () async {
                 Navigator.pop(context);
-                await shareSongText(hostContext, song, semitones: config.semitones, lyricsOnly: config.lyricsOnly);
+                await shareSongText(hostContext, song, semitones: config.shiftFor(song.id), lyricsOnly: config.lyricsOnly);
               },
             ),
             ListTile(
@@ -159,7 +192,7 @@ class ViewOptionsPanel extends StatelessWidget {
               subtitle: const Text('Canción en el tono actual, lista para imprimir'),
               onTap: () async {
                 Navigator.pop(context);
-                await shareSongPdf(hostContext, song, semitones: config.semitones, lyricsOnly: config.lyricsOnly);
+                await shareSongPdf(hostContext, song, semitones: config.shiftFor(song.id), lyricsOnly: config.lyricsOnly);
               },
             ),
           ]),

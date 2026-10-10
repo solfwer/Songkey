@@ -42,6 +42,14 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
   List<String>? _structure;
   late TabController _tabCtrl;
 
+  /// true mientras el cambio de texto viene del editor visual: as no se
+  /// reconstruye el editor con su propio resultado.
+  bool _fromVisual = false;
+
+  /// Contador que fuerza la recarga del editor visual cuando el cuerpo se
+  /// edita en la pestaa Texto o se importa un PDF.
+  int _visualRev = 0;
+
   @override
   void initState() {
     super.initState();
@@ -55,6 +63,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
     groupId = widget.song?.groupId ?? widget.initialGroupId;
     _structure = widget.song?.structure?.toList();
     _tabCtrl = TabController(length: 4, vsync: this);
+    body.addListener(_onBodyTextChanged);
   }
 
   static String _durationLabel(int? sec) {
@@ -65,6 +74,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
   @override
   void dispose() {
     _tabCtrl.dispose();
+    body.removeListener(_onBodyTextChanged);
     for (final c in [title, key, bpm, author, style, duration, body]) {
       c.dispose();
     }
@@ -72,7 +82,18 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
   }
 
   void _onVisualChanged(String newBody) {
+    // Marca el origen del cambio para no recargar el editor visual con su
+    // propio resultado (y volver al inicio del scroll).
+    _fromVisual = true;
     body.text = newBody;
+    _fromVisual = false;
+  }
+
+  /// El texto cambi desde la pestaña Texto (o por una importacin de PDF):
+  /// el editor visual se reconstruye con la versin nueva.
+  void _onBodyTextChanged() {
+    if (_fromVisual) return;
+    setState(() => _visualRev++);
   }
 
   @override
@@ -130,11 +151,12 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
               FilledButton(onPressed: save, child: const Text('Guardar')),
             ]),
           ),
-          // Pestaña 3: editor visual
+          // Pestaña 3: editor visual (se recarga si el texto cambi fuera)
           Column(
             children: [
               Expanded(
                 child: VisualChordEditor(
+                  key: ValueKey('visual$_visualRev'),
                   initialBody: body.text,
                   songKey: key.text,
                   onChanged: _onVisualChanged,
