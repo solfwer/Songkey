@@ -34,8 +34,13 @@ class CompactSongView extends StatefulWidget {
   /// Notacin americana o latina.
   final bool american;
 
-  /// Si es false, no se calcula el auto-ajuste y se usa [_maxFontSize].
+  /// Si es true, se busca el tamao ms grande que haga que toda la cancin
+  /// quepa en pantalla (sin pasarse de [maxFontSize]).
   final bool autoFit;
+
+  /// Tamao elegido por el usuario (panel de opciones o Ajustes): es el tope
+  /// que se usa al auto-ajustar y el tamao fijo si el auto-ajuste est apagado.
+  final double maxFontSize;
 
   const CompactSongView({
     super.key,
@@ -44,6 +49,7 @@ class CompactSongView extends StatefulWidget {
     required this.semitones,
     this.american = true,
     this.autoFit = true,
+    this.maxFontSize = 22,
   });
 
   @override
@@ -51,13 +57,13 @@ class CompactSongView extends StatefulWidget {
 }
 
 class _CompactSongViewState extends State<CompactSongView> {
-  double _fontSize = _maxFontSize;
+  double _fontSize = 22;
 
   @override
   void didUpdateWidget(covariant CompactSongView old) {
     super.didUpdateWidget(old);
-    if (old.song.body != widget.song.body || old.lyricsOnly != widget.lyricsOnly || old.autoFit != widget.autoFit) {
-      _fontSize = _maxFontSize;
+    if (old.song.body != widget.song.body || old.lyricsOnly != widget.lyricsOnly || old.autoFit != widget.autoFit || old.maxFontSize != widget.maxFontSize) {
+      _fontSize = widget.maxFontSize;
     }
   }
 
@@ -69,9 +75,11 @@ class _CompactSongViewState extends State<CompactSongView> {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (widget.autoFit) {
-          _fontSize = _mejorFontSize(secs, constraints.maxWidth, constraints.maxHeight, widget.lyricsOnly);
-        }
+        // Con auto-ajuste se busca el mejor tamao hasta el mximo que el
+        // usuario ha elegido; sin l, se usa ese tamao tal cual.
+        _fontSize = widget.autoFit
+            ? _mejorFontSize(secs, constraints.maxWidth, constraints.maxHeight, widget.lyricsOnly).clamp(_minFontSize, widget.maxFontSize)
+            : widget.maxFontSize;
         return SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -112,10 +120,10 @@ class _CompactSongViewState extends State<CompactSongView> {
 
   /// Busca la fuente ms grande con la que todo cabe en pantalla.
   double _mejorFontSize(List<CompactSection> secs, double width, double height, bool lyricsOnly) {
-    if (_cabe(secs, _maxFontSize, width, height, lyricsOnly)) return _maxFontSize;
+    if (_cabe(secs, widget.maxFontSize, width, height, lyricsOnly)) return widget.maxFontSize;
     if (!_cabe(secs, _minFontSize, width, height, lyricsOnly)) return _minFontSize;
     var lo = _minFontSize;
-    var hi = _maxFontSize;
+    var hi = widget.maxFontSize;
     for (var i = 0; i < 8; i++) {
       final mid = (lo + hi) / 2;
       if (_cabe(secs, mid, width, height, lyricsOnly)) {

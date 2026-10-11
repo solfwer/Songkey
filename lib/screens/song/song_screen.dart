@@ -120,6 +120,7 @@ class _SongScreenState extends State<SongScreen> {
         song: displayed,
         hostContext: context,
         config: config,
+        compactView: widget.store.compactView,
         onChanged: () => setState(() {}),
         onEdit: () async {
           await Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongEditorPage(store: widget.store, song: displayed)));
@@ -280,6 +281,9 @@ class _SongPageState extends State<_SongPage> {
                 lyricsOnly: widget.config.lyricsOnly,
                 semitones: widget.config.shiftFor(widget.song.id),
                 american: widget.config.americanNotation,
+                // El tamao lo manda el usuario desde el panel de opciones.
+                autoFit: true,
+                maxFontSize: widget.config.fontSize,
               )
             : widget.config.autoFit
                 ? AutoFitSongBody(

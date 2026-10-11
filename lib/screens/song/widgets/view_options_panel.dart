@@ -36,6 +36,9 @@ class SongViewConfig {
 class ViewOptionsPanel extends StatelessWidget {
   final Song song;
 
+  /// true si la cancin se ve en vista compacta (Ajustes > Vista compacta).
+  final bool compactView;
+
   /// Contexto de la pantalla (no del drawer): sigue montado tras cerrar el
   /// panel y se usa para compartir/exportar y para navegar al editor.
   final BuildContext hostContext;
@@ -52,6 +55,7 @@ class ViewOptionsPanel extends StatelessWidget {
     required this.onChanged,
     required this.onEdit,
     required this.onDelete,
+    this.compactView = false,
   });
 
   Widget _panelLabel(String text) {
@@ -142,7 +146,10 @@ class ViewOptionsPanel extends StatelessWidget {
                 onChanged();
               },
             ),
-            if (!config.autoFit)
+            // El control de tamao se ve siempre, salvo cuando el auto-ajuste
+            // manda del todo en la vista normal. En la compacta s se ve (es
+            // el tamao mximo que se busca).
+            if (!config.autoFit || compactView)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
                 child: Column(children: [
@@ -152,7 +159,7 @@ class ViewOptionsPanel extends StatelessWidget {
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       const Icon(Icons.format_size, size: 20),
-                      const Text('Tamaño de fuente'),
+                      Text(compactView ? 'Tamaño máximo' : 'Tamaño de fuente'),
                       Text('${config.fontSize.round()}px', style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.accent)),
                     ],
                   ),
