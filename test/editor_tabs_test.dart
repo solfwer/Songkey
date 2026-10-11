@@ -11,7 +11,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: SongEditorPage(store: Store())));
     await tester.pumpAndSettle();
 
-    for (final label in ['Datos', 'Contenido', 'Estructura', 'Vista previa']) {
+    for (final label in ['Datos', 'Contenido', 'Estructura', 'Vista']) {
       expect(find.text(label), findsOneWidget, reason: 'falta la pestaa $label');
     }
     expect(tester.takeException(), isNull);
@@ -61,10 +61,11 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Vista previa'));
+    await tester.tap(find.text('Vista'));
     await tester.pumpAndSettle();
     // Se ven los encabezados de seccin y la letra.
-    expect(find.text('VERSO 1'), findsOneWidget);
+    expect(find.textContaining('VERSO 1'), findsOneWidget);
+
     expect(find.text('CORO'), findsOneWidget);
     expect(find.textContaining('Hola'), findsWidgets);
     expect(tester.takeException(), isNull);

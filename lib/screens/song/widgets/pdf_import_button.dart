@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../../../data/store.dart';
 import '../../../services/pdf_chordpro/pdf_to_chordpro_service.dart';
 import '../pdf_review_page.dart';
+import '../pdf_format_help_page.dart';
 
 class PdfImportButton extends StatelessWidget {
   final Store store;
@@ -52,10 +53,19 @@ class PdfImportButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      icon: const Icon(Icons.picture_as_pdf),
-      label: const Text('Importar cancin desde PDF'),
-      onPressed: () => _import(context),
-    );
+    return Row(children: [
+      Expanded(
+        child: OutlinedButton.icon(
+          icon: const Icon(Icons.picture_as_pdf),
+          label: const Text('Importar cancin desde PDF'),
+          onPressed: () => _import(context),
+        ),
+      ),
+      IconButton(
+        tooltip: 'Cmo tiene que ser el PDF',
+        icon: const Icon(Icons.help_outline),
+        onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PdfFormatHelpPage())),
+      ),
+    ]);
   }
 }

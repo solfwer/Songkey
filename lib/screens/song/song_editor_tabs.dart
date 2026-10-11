@@ -20,8 +20,7 @@ class ContentTab extends StatefulWidget {
   final int visualRevision;
   final ValueChanged<String> onVisualChanged;
   final Store store;
-  final VoidCallback onSave;
-  const ContentTab({required this.body, required this.songKey, required this.visualRevision, required this.onVisualChanged, required this.store, required this.onSave});
+  const ContentTab({required this.body, required this.songKey, required this.visualRevision, required this.onVisualChanged, required this.store});
 
   @override
   State<ContentTab> createState() => _ContentTabState();
@@ -86,8 +85,8 @@ class _ContentTabState extends State<ContentTab> {
           width: double.infinity,
           child: SegmentedButton<bool>(
             segments: const [
-              ButtonSegment(value: true, icon: Icon(Icons.touch_app, size: 16), label: Text('Editor visual')),
-              ButtonSegment(value: false, icon: Icon(Icons.code, size: 16), label: Text('ChordPro')),
+              ButtonSegment(value: true, label: Text('Editor visual')),
+              ButtonSegment(value: false, label: Text('ChordPro')),
             ],
             selected: {_visualMode},
             showSelectedIcon: false,
@@ -105,18 +104,9 @@ class _ContentTabState extends State<ContentTab> {
               )
             : ChordProEditor(controller: widget.body, wide: wide),
       ),
-      // Guardar funciona igual en los dos modos.
-      SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
-          child: FilledButton.icon(
-            onPressed: widget.onSave,
-            icon: const Icon(Icons.save, size: 18),
-            label: const Text('Guardar'),
-          ),
-        ),
-      ),
+      // El botn de guardar est en la barra inferior del editor, fuera de
+      // aqu, para que se vea en todas las pestaas.
+
     ]);
   }
 }

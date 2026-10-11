@@ -64,8 +64,12 @@ bool isChord(String t) => _chord.hasMatch(t);
 
 /// Reconoce líneas que actúan como encabezado de sección ("Verso 1", "Coro", etc.)
 /// y también las directivas ChordPro que abren sección (`{start_of_verse: VERSO 1}`).
-bool isSectionHeader(String line) =>
-    _header.hasMatch(_deaccent(line)) || _startOf.hasMatch(line.trim());
+bool isSectionHeader(String line) {
+  if (_startOf.hasMatch(line.trim()) || _endOf.hasMatch(line.trim())) return true;
+  // Metadatos y comentarios: tampoco se editan como letra.
+  if (RegExp(r'^\\s*\\{\\s*[a-z_]+\\s*[:=]', caseSensitive: false).hasMatch(line)) return true;
+  return _header.hasMatch(_deaccent(line));
+}
 
 /// true si la línea es una directiva ChordPro de apertura de sección.
 bool isChordProSectionStart(String line) => _startOf.hasMatch(line.trim());
