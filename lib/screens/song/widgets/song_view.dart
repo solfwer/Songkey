@@ -157,12 +157,18 @@ class SongLineView extends StatelessWidget {
         style: TextStyle(fontFamily: 'monospace', height: chordLineHeight),
       );
     }
-    return Wrap(spacing: 0, children: [
+    // Cada columna lleva un pequeo margen a los lados: as dos acordes
+    // seguidos ([A/C#][Am/C]) no se pegan y no se confunden al leer.
+    const margen = EdgeInsets.symmetric(horizontal: 3);
+    return Wrap(spacing: 0, runSpacing: 2, children: [
       for (final seg in line)
-        Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(seg.chord != null ? notateChord(transposeChord(seg.chord!, semitones), american: american) : (line.any((x) => x.chord != null) ? ' ' : ''), style: TextStyle(fontSize: fontSize * chordScale, height: chordLineHeight, fontWeight: FontWeight.bold, color: const Color(0xFF5AD1E6), fontFamily: 'monospace')),
-          Text(seg.text.isEmpty ? ' ' : seg.text, style: TextStyle(fontSize: fontSize, height: lineHeight, color: Colors.white)),
-        ]),
+        Padding(
+          padding: margen,
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(seg.chord != null ? notateChord(transposeChord(seg.chord!, semitones), american: american) : (line.any((x) => x.chord != null) ? ' ' : ''), style: TextStyle(fontSize: fontSize * chordScale, height: chordLineHeight, fontWeight: FontWeight.bold, color: const Color(0xFF5AD1E6), fontFamily: 'monospace')),
+            Text(seg.text.isEmpty ? ' ' : seg.text, style: TextStyle(fontSize: fontSize, height: lineHeight, color: Colors.white)),
+          ]),
+        ),
     ]);
   }
 }

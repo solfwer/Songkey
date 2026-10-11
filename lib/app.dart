@@ -61,10 +61,13 @@ class _HomeShellState extends State<HomeShell> {
         ]),
       ),
       body: IndexedStack(index: _index, children: pages),
+      // El color sale del tema: en modo claro se ve clara (con un color fijo
+      // oscuro los iconos no se veian).
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
-        backgroundColor: AppColors.card,
+        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHigh,
+        indicatorColor: Theme.of(context).colorScheme.primaryContainer,
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Home'),
           NavigationDestination(icon: Icon(Icons.library_music_outlined), label: 'Biblioteca'),

@@ -11,11 +11,8 @@
 import 'package:flutter/material.dart';
 
 import '../../data/chord_parser.dart';
-import '../../data/store.dart';
 import '../../models/app_state.dart';
-import '../../models/song.dart';
 import 'widgets/header_badge.dart';
-import 'widgets/song_view.dart' show sectionKindColor;
 
 /// Una sección de la canción: la letra vive aquí, una sola vez.
 class _Sec {
@@ -151,8 +148,9 @@ class _StructureTabState extends State<StructureTab> {
   int _vecesUsada(String id) => _arr.where((r) => r.sectionId == id).length;
 
   /// Secciones que aún no suenan: las del panel derecho.
-  List<_Sec> get _disponibles => [for (final s in _secs) if (_vecesUsada(s.id) == 0) s];
-
+  /// Panel derecho: TODAS las secciones (el mismo catalogo que en el panel
+  /// izquierdo), para poder arrastrarlas al orden aunque ya suenen.
+  List<_Sec> get _disponibles => List.of(_secs);
   String _pista(_Sec sec) {
     final n = sec.lines.where((l) => l.trim().isNotEmpty).length;
     return n == 0 ? 'sin letra aún' : '$n líneas';
@@ -260,17 +258,9 @@ class _StructureTabState extends State<StructureTab> {
   }
 
   Future<void> _nuevaSeccion() async {
-    final c = TextEditingController();
     final nombre = await showDialog<String>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Nueva sección'),
-        content: TextField(controller: c, autofocus: true, decoration: const InputDecoration(hintText: 'Verso 3, Coro, Puente...'), onSubmitted: (v) => Navigator.pop(context, v)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
-          FilledButton(onPressed: () => Navigator.pop(context, c.text), child: const Text('Crear')),
-        ],
-      ),
+      builder: (_) => _DialogoNuevaSeccion(crear: (v) => Navigator.pop(context, v)),
     );
     final etiqueta = (nombre ?? '').trim();
     if (etiqueta.isEmpty) return;
@@ -505,12 +495,12 @@ class _StructureTabState extends State<StructureTab> {
           margin: const EdgeInsets.only(left: 0, top: 6),
           decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white24)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _tituloPanel(Icons.playlist_add, 'Disponibles', '${_disponibles.length}'),
+            _tituloPanel(Icons.library_music, 'Secciones', '${_disponibles.length} en total'),
             Expanded(
               child: _disponibles.isEmpty
                   ? const Padding(
                       padding: EdgeInsets.all(16),
-                      child: Text('Todas las secciones están en el orden.', style: TextStyle(color: Colors.grey, fontSize: 13)),
+                      child: Text('An no hay secciones. Crea una con el botn de abajo.', style: TextStyle(color: Colors.grey, fontSize: 13)),
                     )
                   : ListView.builder(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -679,6 +669,97 @@ class _TarjetaDisponible extends StatelessWidget {
 }
 
 /// Diálogo para elegir por qué línea se corta una sección.
+/// Dialogo para crear una seccion nueva: lista desplegable con los tipos que
+/// puede tener una cancion, mas el numero o un nombre libre.
+class _DialogoNuevaSeccion extends StatefulWidget {
+  final ValueChanged<String> crear;
+  const _DialogoNuevaSeccion({required this.crear});
+
+  @override
+  State<_DialogoNuevaSeccion> createState() => _DialogoNuevaSeccionState();
+}
+
+/// Tipos de seccion que se le ofrecen al usuario.
+const _tiposSeccion = <({String valor, String etiqueta})>[
+  (valor: 'INTRODUCCION', etiqueta: 'Introduccion'),
+  (valor: 'VERSO', etiqueta: 'Verso'),
+  (valor: 'PRE-CORO', etiqueta: 'Pre-coro'),
+  (valor: 'CORO', etiqueta: 'Coro'),
+  (valor: 'PUENTE', etiqueta: 'Puente'),
+  (valor: 'INTERLUDIO', etiqueta: 'Interludio'),
+  (valor: 'INSTRUMENTAL', etiqueta: 'Instrumental'),
+  (valor: 'TRANSICION', etiqueta: 'Transicion'),
+  (valor: 'FINAL', etiqueta: 'Final'),
+  (valor: 'OUTRO', etiqueta: 'Outro'),
+];
+
+class _DialogoNuevaSeccionState extends State<_DialogoNuevaSeccion> {
+  String _tipo = 'VERSO';
+  final _numero = TextEditingController(text: '2');
+  final _libre = TextEditingController();
+  bool _conNumero = true;
+
+  @override
+  void dispose() {
+    _numero.dispose();
+    _libre.dispose();
+    super.dispose();
+  }
+
+  void _crear() {
+    if (_conNumero) {
+      final n = _numero.text.trim();
+      widget.crear(n.isEmpty ? _tipo : '$_tipo $n');
+    } else {
+      final libre = _libre.text.trim();
+      if (libre.isNotEmpty) widget.crear(libre);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('Nueva seccion'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            DropdownButtonFormField<String>(
+              initialValue: _tipo,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Tipo de seccion'),
+              items: [for (final t in _tiposSeccion) DropdownMenuItem(value: t.valor, child: Text(t.etiqueta))],
+              onChanged: (v) {
+                if (v != null) setState(() => _tipo = v);
+              },
+            ),
+            const SizedBox(height: 12),
+            SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(value: true, label: Text('Con numero')),
+                ButtonSegment(value: false, label: Text('Nombre libre')),
+              ],
+              selected: {_conNumero},
+              onSelectionChanged: (v) => setState(() => _conNumero = v.first),
+            ),
+            const SizedBox(height: 12),
+            if (_conNumero)
+              TextField(
+                controller: _numero,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: 'Numero', hintText: '2'),
+              )
+            else
+              TextField(
+                controller: _libre,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: 'Nombre', hintText: 'Solo de guitarra'),
+              ),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          FilledButton(onPressed: _crear, child: const Text('Crear')),
+        ],
+      );
+}
 class _DialogoDividir extends StatefulWidget {
   final List<String> lines;
   const _DialogoDividir({required this.lines});

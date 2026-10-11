@@ -6,15 +6,12 @@
 //     pestañas Texto y Editor visual.
 import 'package:flutter/material.dart';
 
-import '../../data/chord_parser.dart';
 import '../../data/chordpro.dart';
 import '../../data/format.dart';
 import '../../data/store.dart';
 import '../../models/app_state.dart';
 import '../../models/song.dart';
 import 'widgets/pdf_import_button.dart';
-import 'widgets/song_view.dart' show sectionKindColor;
-import 'widgets/visual_chord_editor.dart';
 import 'song_editor_tabs.dart';
 import 'structure_tab.dart';
 
@@ -242,26 +239,54 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
     }
   }
 
+  /// Deja el cuerpo como lo escribi el usuario y solo pone al principio las
+  /// directivas de metadatos (quitando las que ya hubiera, para no duplicar).
+  String _cuerpoConMetadatos({
+    required String cuerpo,
+    required String titulo,
+    required String autor,
+    required String tono,
+    required String tempo,
+  }) {
+    final meta = RegExp(r'^\s*\{\s*(title|t|subtitle|st|artist|author|composer|key|k|tempo|bpm|time|capo)\s*[:=].*\}\s*$', caseSensitive: false);
+    final lineas = cuerpo.replaceAll('\r', '').split('\n');
+    final resto = <String>[];
+    for (final l in lineas) {
+      if (meta.hasMatch(l)) continue;
+      resto.add(l);
+    }
+    while (resto.isNotEmpty && resto.first.trim().isEmpty) {
+      resto.removeAt(0);
+    }
+    final cabecera = <String>[
+      if (titulo.isNotEmpty) '{title: $titulo}',
+      if (autor.isNotEmpty) '{artist: $autor}',
+      if (tono.isNotEmpty) '{key: $tono}',
+      if (tempo.isNotEmpty) '{tempo: $tempo}',
+    ];
+    if (cabecera.isEmpty) return resto.join('\n');
+    return [...cabecera, '', ...resto].join('\n');
+  }
   void save() {
     if (title.text.trim().isEmpty) return;
     final id = widget.song?.id ?? uid();
     // El cuerpo se guarda SIEMPRE en el formato cannica: los metadatos de la
     // pestaa Datos se escriben como directivas al principio del texto.
-    final parsed = ChordProParser().parse(body.text);
-    parsed.meta.title = title.text.trim();
     final authorText = author.text.trim();
-    parsed.meta.artist = authorText.isEmpty ? null : authorText;
     final keyText = key.text.trim();
-    parsed.meta.key = keyText.isEmpty ? null : keyText;
     final bpmText = bpm.text.trim();
-    parsed.meta.tempo = bpmText.isEmpty ? null : bpmText;
-    var bodyCanonico = const ChordProSerializer().write(parsed);
 
-    // Proteccin: si el parseo no ha sacado ninguna seccin pero el texto
-    // original s tena letra, se guarda el texto tal cual (mejor feo que vaco).
-    if (parsed.sections.isEmpty && body.text.trim().isNotEmpty) {
-      bodyCanonico = body.text;
-    }
+    // El cuerpo se guarda TAL CUAL lo ha escrito el usuario (si puso un espacio
+    // dentro del corchete, se queda). Lo nico que se aade o se actualiza son
+    // las directivas de metadatos del principio, para que no se pierdan.
+    final bodyCanonico = _cuerpoConMetadatos(
+      cuerpo: body.text,
+      titulo: title.text.trim(),
+      autor: authorText,
+      tono: keyText,
+      tempo: bpmText,
+    );
+
     // El controlador se queda con lo que realmente se ha guardado y a partir
     // de aqu ya no hay cambios pendientes.
     body.text = bodyCanonico;
