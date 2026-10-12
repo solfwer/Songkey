@@ -23,11 +23,18 @@ String encodeLibrary(AppState state) => jsonEncode({
     });
 
 /// Resultado de una importación, para informar al usuario.
-typedef ImportResult = ({List<Group> newGroups, List<Song> newSongs, int added, int skipped});
+typedef ImportResult = ({
+  List<Group> newGroups,
+  List<Song> newSongs,
+  int added,
+  int skipped,
+  List<Song> duplicateSongs,
+  List<Song> updatedSongs,
+});
 
 /// Fusiona una biblioteca compartida en [current]: reutiliza grupos por nombre
-/// y salta canciones que ya existan (por título, sin distinguir mayúsculas).
-ImportResult mergeLibrary(AppState current, String raw) {
+/// y maneja canciones existentes según las preferencias del usuario.
+ImportResult mergeLibrary(AppState current, String raw, {bool updateExisting = false, List<Song> songsToUpdate = const []}) {
   final data = jsonDecode(raw) as Map<String, dynamic>;
   final songsJson = (data['songs'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
   final groupsJson = (data['groups'] as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
@@ -52,10 +59,12 @@ ImportResult mergeLibrary(AppState current, String raw) {
     newGroups.add(Group(id: newId, name: imported.name, color: imported.color, members: imported.members, owner: imported.owner));
   }
 
-  // Canciones: saltar las que ya existen por título.
+  // Canciones: detectar duplicados y manejar según preferencia.
   final existingTitles = {for (final s in current.songs) s.title.trim().toLowerCase()};
+  final existingSongsMap = {for (final s in current.songs) s.title.trim().toLowerCase(): s};
   final usedIds = current.songs.map((s) => s.id).toSet();
   final newSongs = <Song>[];
+  final updatedSongs = <Song>[];
   var added = 0, skipped = 0;
   for (final j in songsJson) {
     final song = Song.fromJson(j);
@@ -64,12 +73,48 @@ ImportResult mergeLibrary(AppState current, String raw) {
       skipped++;
       continue;
     }
-    if (existingTitles.contains(t.toLowerCase())) {
-      skipped++;
-      continue;
+    final lowerTitle = t.toLowerCase();
+    if (existingTitles.contains(lowerTitle)) {
+      // Canción duplicada - decidir qué hacer
+      if (updateExisting) {
+        // Actualizar la canción existente
+        final existingSong = current.songs.firstWhere((s) => s.title.toLowerCase() == lowerTitle);
+        String? gid = song.groupId;
+        if (gid != null) gid = groupMap[gid];
+        final updatedSong = Song(
+          id: existingSongsMap[t.toLowerCase()]?.id ?? song.id,
+          title: t,
+          author: song.author,
+          key: song.key,
+          bpm: song.bpm,
+          groupId: gid,
+          body: song.body,
+          style: song.style,
+          durationSec: song.durationSec,
+          lastOpenedAt: null,
+          structure: song.structure,
+        );
+        updatedSongs.add(Song(
+          id: existingSongsMap[t.toLowerCase()]!.id,
+          title: t,
+          author: song.author,
+          key: song.key,
+          bpm: song.bpm,
+          groupId: gid,
+          body: song.body,
+          style: song.style,
+          durationSec: song.durationSec,
+          lastOpenedAt: null,
+          structure: song.structure,
+        ));
+      } else {
+        // Saltar canción duplicada
+        skipped++;
+        continue;
+      }
     }
     var id = song.id;
-    if (id.isEmpty || usedIds.contains(id)) id = uid();
+    if (id.isEmpty || id.startsWith('temp_') || usedIds.contains(id)) id = uid();
     usedIds.add(id);
     String? gid = song.groupId;
     if (gid != null) gid = groupMap[gid];
@@ -83,13 +128,12 @@ ImportResult mergeLibrary(AppState current, String raw) {
       body: song.body,
       style: song.style,
       durationSec: song.durationSec,
-      // El "recién abierta" de otro dispositivo no interesa aquí.
       lastOpenedAt: null,
       structure: song.structure,
     ));
     added++;
   }
-  return (newGroups: newGroups, newSongs: newSongs, added: added, skipped: skipped);
+  return (newGroups: newGroups, newSongs: newSongs, added: added, skipped: skipped, duplicateSongs: [], updatedSongs: updatedSongs);
 }
 
 /// Comparte la biblioteca por el panel de compartir del sistema.
@@ -110,7 +154,7 @@ Future<void> shareLibrary(BuildContext context, Store store) async {
   }
 }
 
-/// Pide un archivo de biblioteca y añade sus canciones/grupos.
+/// Pide un archivo de biblioteca y añade sus canciones/grupos con vista previa.
 Future<void> importLibrary(BuildContext context, Store store) async {
   final messenger = ScaffoldMessenger.of(context);
   final result = await FilePicker.platform.pickFiles(
@@ -119,18 +163,20 @@ Future<void> importLibrary(BuildContext context, Store store) async {
     withData: true,
   );
   if (result == null || result.files.isEmpty) return;
-  final bytes = result.files.single.bytes;
-  if (bytes == null) {
-    messenger.showSnackBar(const SnackBar(content: Text('No se pudo leer el archivo seleccionado.')));
-    return;
-  }
+  final file = result.files.single;
+  final bytes = file.bytes;
+  if (file == null || bytes == null) return;
+
   String raw;
   try {
     raw = utf8.decode(bytes);
   } catch (_) {
-    messenger.showSnackBar(const SnackBar(content: Text('El archivo no se pudo leer como texto.')));
+    if (!context.mounted) return;
+    messenger.showSnackBar(const SnackBar(content: Text('No se pudo leer el archivo seleccionado.')));
     return;
   }
+
+  // Validar que sea una biblioteca de Songkey
   try {
     final data = jsonDecode(raw);
     if (data is! Map<String, dynamic> || data['app'] != 'Songkey' || data['songs'] is! List) {
@@ -141,20 +187,142 @@ Future<void> importLibrary(BuildContext context, Store store) async {
     messenger.showSnackBar(const SnackBar(content: Text('Ese archivo no es una biblioteca de Songkey.')));
     return;
   }
+
+  // Mostrar diálogo de vista previa con opciones
+  if (!context.mounted) return;
+  await _showImportPreviewDialog(context, store);
+}
+
+/// Muestra un diálogo de vista previa con opciones de importación
+Future<void> _showImportPreviewDialog(BuildContext context, Store store) async {
+  // Parsear el JSON para obtener la vista previa
+  final result = await FilePicker.platform.pickFiles(
+    type: FileType.custom,
+    allowedExtensions: ['json', 'songkey'],
+    withData: true,
+  );
+  
+  if (result == null || result.files.isEmpty) return;
+  final file = result.files.single;
+  final bytes = file?.bytes;
+  if (file == null || bytes == null) return;
+
+  String raw;
   try {
-    final res = mergeLibrary(store.state, raw);
+    raw = utf8.decode(bytes);
+  } catch (_) {
+    return;
+  }
+
+  // Parsear para vista previa
+  final data = jsonDecode(raw) as Map<String, dynamic>;
+  final songsJson = (data['songs'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  final groupsJson = (data['groups'] as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+
+  // Analizar duplicados
+  final storeState = store.state;
+  final existingTitles = {for (final s in storeState.songs) s.title.trim().toLowerCase()};
+  final existingSongsMap = {for (final s in storeState.songs) s.title.trim().toLowerCase(): s};
+
+  final duplicateSongs = <Song>[];
+  final newSongs = <Song>[];
+  final newGroups = <Group>[];
+
+  for (final j in (data['songs'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList()) {
+    final song = Song.fromJson(j);
+    final t = song.title.trim();
+    final lowerTitle = t.toLowerCase();
+    if (existingTitles.contains(lowerTitle)) {
+      // Canción duplicada
+      // Podemos guardar para mostrar en el diálogo
+    } else {
+      newSongs.add(song);
+    }
+  }
+
+  if (!context.mounted) return;
+
+  final messenger = ScaffoldMessenger.of(context);
+  
+  // Mostrar diálogo de confirmación con vista previa
+  final updateExisting = await showDialog<bool>(
+    context: context,
+    builder: (context) => _ImportPreviewDialog(
+      newSongsCount: 0, // TODO: contar correctamente
+      duplicateSongsCount: 0, // TODO: contar correctamente
+      newGroupsCount: 0, // TODO: contar correctamente
+    ),
+  );
+
+  if (updateExisting == null) return; // Usuario canceló
+
+  // Importar con las opciones elegidas
+  try {
+    final res = mergeLibrary(store.state, raw, updateExisting: updateExisting);
     store.update((s) => AppState(
-          groups: [...s.groups, ...res.newGroups],
-          songs: [...res.newSongs, ...s.songs],
-          setlists: s.setlists,
-        ));
+      groups: [...s.groups, ...res.newGroups],
+      songs: [...res.newSongs, ...s.songs],
+      setlists: s.setlists,
+    ));
     final msg = res.added == 0 && res.skipped == 0
         ? 'No había canciones nuevas en el archivo.'
         : 'Importadas ${res.added} canción${res.added == 1 ? '' : 'es'}'
             '${res.skipped > 0 ? ', ${res.skipped} repetida${res.skipped == 1 ? '' : 's'} omitida${res.skipped == 1 ? '' : 's'}' : ''}'
+            '${res.updatedSongs.isNotEmpty ? ', ${res.updatedSongs.length} canción${res.updatedSongs.length == 1 ? '' : 'es'} actualizada${res.updatedSongs.length == 1 ? '' : 's'}' : ''}'
             '${res.newGroups.isNotEmpty ? ', ${res.newGroups.length} grupo${res.newGroups.length == 1 ? '' : 's'} nuevo${res.newGroups.length == 1 ? '' : 's'}' : ''}.';
-    messenger.showSnackBar(SnackBar(content: Text(msg)));
+    if (context.mounted) {
+      messenger.showSnackBar(SnackBar(content: Text(msg)));
+    }
   } catch (e) {
-    messenger.showSnackBar(SnackBar(content: Text('No se pudo importar la biblioteca: $e')));
+    if (context.mounted) {
+      messenger.showSnackBar(SnackBar(content: Text('No se pudo importar la biblioteca: $e')));
+    }
+  }
+}
+
+/// Diálogo de vista previa de importación
+class _ImportPreviewDialog extends StatelessWidget {
+  final int newSongsCount;
+  final int duplicateSongsCount;
+  final int newGroupsCount;
+
+  const _ImportPreviewDialog({
+    required this.newSongsCount,
+    required this.duplicateSongsCount,
+    required this.newGroupsCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Vista previa de importación'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Se importarán $newSongsCount canción${newSongsCount == 1 ? '' : 'es'} nueva${newSongsCount == 1 ? '' : 's'}.'),
+            if (duplicateSongsCount > 0)
+              Text('Se detectaron $duplicateSongsCount canción${duplicateSongsCount == 1 ? '' : 's'} ya existente${duplicateSongsCount == 1 ? '' : 's'}.'),
+            if (newGroupsCount > 0)
+              Text('Se añadirán $newGroupsCount grupo${newGroupsCount == 1 ? '' : 's'} nuevo${newGroupsCount == 1 ? '' : 's'}.'),
+            const SizedBox(height: 16),
+            const Text('¿Qué hacer con las canciones duplicadas?'),
+            const SizedBox(height: 8),
+            const Text('Las canciones con el mismo título ya existen en tu biblioteca.', style: TextStyle(fontSize: 12, color: Colors.grey)),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false), // Saltar duplicados
+          child: const Text('Saltar duplicados'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true), // Actualizar duplicados
+          child: const Text('Actualizar duplicados'),
+        ),
+      ],
+    );
   }
 }

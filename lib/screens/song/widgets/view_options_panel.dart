@@ -20,6 +20,12 @@ class SongViewConfig {
   /// true = notación americana (C, G, Am); false = latina (Do, Sol, Lam).
   bool americanNotation;
 
+  /// Auto-desplazamiento (auto-scroll) para lectura manos libres.
+  bool autoScroll = false;
+
+  /// Velocidad de auto-scroll en px/s (10-100, por defecto 25).
+  double autoScrollSpeed = 25.0;
+
   /// Transposición (en semitonos) elegida para cada canción. Se guarda por id
   /// de canción para que al cambiar el tono dentro de un setlist solo se
   /// mueva esa canción y las demás se queden en su tono original.
@@ -180,6 +186,44 @@ class ViewOptionsPanel extends StatelessWidget {
                   alignment: Alignment.centerLeft,
                   child: Text('Ajuste automático activo: tamaño máximo ${config.fontSize.round()}px, mínimo 11px.', style: const TextStyle(fontSize: 12, color: Colors.grey)),
                 ),
+              ),
+          ]),
+          // Auto-scroll (desplazamiento automático)
+          _panelLabel('Desplazamiento automático'),
+          _panelCard([
+            SwitchListTile(
+              secondary: const Icon(Icons.play_circle_outline, color: AppColors.accent),
+              title: const Text('Desplazamiento automático'),
+              subtitle: const Text('Desplaza la letra automáticamente para lectura manos libres'),
+              value: config.autoScroll,
+              onChanged: (v) {
+                config.autoScroll = v;
+                onChanged();
+              },
+            ),
+            if (config.autoScroll)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+                child: Column(children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 2,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      const Icon(Icons.speed, size: 20),
+                      const Text('Velocidad'),
+                      Text('${config.autoScrollSpeed.round()} px/s', style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.accent)),
+                    ],
+                  ),
+                  Slider(value: config.autoScrollSpeed, min: 10, max: 100, divisions: 18, label: '${config.autoScrollSpeed.round()} px/s', onChanged: (v) {
+                    config.autoScrollSpeed = v;
+                    onChanged();
+                  }),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('Vista previa: ${config.autoScrollSpeed.round()} px/s', style: TextStyle(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.bold)),
+                  ),
+                ]),
               ),
           ]),
           _panelLabel('Compartir y exportar'),
