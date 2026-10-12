@@ -1,0 +1,49 @@
+# Compila la app para iOS y deja el .ipa listo para descargar.
+#
+# iOS no se puede compilar desde Windows, pero este workflow usa un runner
+# de macOS de GitHub (gratis para repos pblicos) y deja el .ipa como
+# artefacto descargable en la pestaa "Actions".
+#
+# Sale SIN FIRMAR: para instalarlo en un iPhone hace falta firmarlo con una
+# cuenta de Apple. Con una cuenta gratuita vale (Sideloudly, 7 das); para
+# repartirlo a otras personas hace falta cuenta de pago (99 USD/ao) y
+# TestFlight o la App Store.
+name: Compilar iOS
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  ipa:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Dependencias
+        run: flutter pub get
+
+      - name: Compilar para iOS (sin firmar)
+        run: flutter build ios --release --no-codesign
+
+      - name: Empaquetar el .ipa
+        run: |
+          mkdir -p Payload
+          cp -r build/ios/iphoneos/Runner.app Payload/
+          rm -f Songkey-iOS.ipa
+          zip -q -r Songkey-iOS.ipa Payload
+          ls -lh Songkey-iOS.ipa
+
+      - name: Dejar el .ipa como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: Songkey-iOS
+          path: Songkey-iOS.ipa
+          retention-days: 30
