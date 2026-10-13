@@ -1,5 +1,7 @@
 // Widgets de dibujado de la canción: chips de sección y cuerpo con letra y
 // acordes. Son puro render: no manejan estado propio.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../data/chord_parser.dart';
@@ -203,7 +205,10 @@ class SectionHeader extends StatelessWidget {
 }
 
 /// Cuerpo de la canción en la vista normal (desplazamiento libre).
-class SongBodyList extends StatelessWidget {
+///
+/// Soporta auto-scroll: si [autoScroll] está activo, la letra se desplaza
+/// sola a la velocidad indicada hasta llegar al final.
+class SongBodyList extends StatefulWidget {
   final List<Section> sections;
   final bool lyricsOnly;
   final int semitones;
@@ -215,14 +220,72 @@ class SongBodyList extends StatelessWidget {
 
   /// Claves por id de sección para calcular la posición de cada una.
   final Map<String, GlobalKey>? sectionKeys;
-  const SongBodyList({super.key, required this.sections, required this.lyricsOnly, required this.semitones, required this.fontSize, this.american = true, this.controller, this.sectionKeys});
+
+  /// Auto-desplazamiento activo.
+  final bool autoScroll;
+
+  /// Velocidad de auto-scroll en px/s.
+  final double autoScrollSpeed;
+  const SongBodyList({super.key, required this.sections, required this.lyricsOnly, required this.semitones, required this.fontSize, this.american = true, this.controller, this.sectionKeys, this.autoScroll = false, this.autoScrollSpeed = 25.0});
+
+  @override
+  State<SongBodyList> createState() => _SongBodyListState();
+}
+
+class _SongBodyListState extends State<SongBodyList> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    // El controller todavía no tiene clients aquí: arrancamos tras el primer
+    // frame para que el scroll exista (si no, el timer no se iniciaba nunca).
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncTimer());
+  }
+
+  @override
+  void didUpdateWidget(covariant SongBodyList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.autoScroll != widget.autoScroll || oldWidget.autoScrollSpeed != widget.autoScrollSpeed) {
+      _syncTimer();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  /// Crea o destruye el temporizador según el estado actual.
+  void _syncTimer() {
+    _timer?.cancel();
+    _timer = null;
+    if (!widget.autoScroll) return;
+    final controller = widget.controller;
+    if (controller == null || !controller.hasClients) return;
+    // Paso pequeo y frecuente => movimiento suave y velocidad constante.
+    const stepMs = 50;
+    _timer = Timer.periodic(const Duration(milliseconds: stepMs), (_) {
+      if (!controller.hasClients) return;
+      final next = controller.offset + widget.autoScrollSpeed * stepMs / 1000;
+      final max = controller.position.maxScrollExtent;
+      if (next >= max) {
+        controller.jumpTo(max);
+        _timer?.cancel();
+        _timer = null;
+      } else {
+        controller.jumpTo(next);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    return ListView(controller: controller, padding: const EdgeInsets.all(16), children: [
-      for (final sec in sections) ...[
+    return ListView(controller: widget.controller, padding: const EdgeInsets.all(16), children: [
+      for (final sec in widget.sections) ...[
         Padding(
-          key: sectionKeys?[sec.id],
+          key: widget.sectionKeys?[sec.id],
           padding: EdgeInsets.zero,
           child: SectionHeader(sec: sec),
         ),
@@ -232,11 +295,11 @@ class SongBodyList extends StatelessWidget {
               ? const SizedBox(height: 10)
               : Padding(
                   padding: const EdgeInsets.symmetric(vertical: 1),
-                  child: SongLineView(line: line, lyricsOnly: lyricsOnly, semitones: semitones, fontSize: fontSize, american: american),
+                  child: SongLineView(line: line, lyricsOnly: widget.lyricsOnly, semitones: widget.semitones, fontSize: widget.fontSize, american: widget.american),
                 ),
         const SizedBox(height: 26),
       ],
-      if (sections.isEmpty) const Text('Esta canción aún no tiene letra.'),
+      if (widget.sections.isEmpty) const Text('Esta canción aún no tiene letra.'),
     ]);
   }
 }

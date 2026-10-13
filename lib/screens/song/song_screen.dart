@@ -11,6 +11,7 @@ import '../../data/format.dart';
 import '../../data/store.dart';
 import '../../models/app_state.dart';
 import '../../models/song.dart';
+import '../../theme.dart';
 import 'song_editor_page.dart';
 import 'widgets/compact_song_view.dart';
 import 'widgets/song_view.dart';
@@ -113,6 +114,13 @@ class _SongScreenState extends State<SongScreen> {
             american: config.americanNotation,
             onSelected: (k) => setState(() => config.setShift(displayed.id, semitoneShift(displayed.key, k))),
           ),
+          // Botón de play/pausa del desplazamiento automático.
+          IconButton(
+            icon: Icon(config.autoScroll ? Icons.pause_circle_filled : Icons.play_circle_filled),
+            tooltip: config.autoScroll ? 'Pausar desplazamiento' : 'Desplazar solo',
+            color: config.autoScroll ? AppColors.accent : null,
+            onPressed: () => setState(() => config.autoScroll = !config.autoScroll),
+          ),
           IconButton(icon: const Icon(Icons.tune), tooltip: 'Opciones de vista', onPressed: () => _scaffoldKey.currentState?.openEndDrawer()),
         ],
       ),
@@ -201,16 +209,12 @@ class _SongPageState extends State<_SongPage> {
       notateChord(sharpen(transposeChord(widget.song.key, widget.config.shiftFor(widget.song.id))), american: widget.config.americanNotation);
 
   String _metaLine() {
-    final group = widget.store.state.groups.where((g) => g.id == widget.song.groupId).map((g) => g.name).firstOrNull;
+    // Solo tono y BPM: el resto se ve al editar la cancin.
     final parts = <String>[
-      group ?? 'Sin grupo',
-      if (widget.song.author != null && widget.song.author!.isNotEmpty) widget.song.author!,
-      if (widget.song.style != null && widget.song.style!.isNotEmpty) widget.song.style!,
       'Tono: ${_displayedKey()}',
       if (widget.song.bpm != null) '${widget.song.bpm} BPM',
-      if (formatDuration(widget.song.durationSec).isNotEmpty) formatDuration(widget.song.durationSec),
     ];
-    return parts.join(' · ');
+    return parts.join('  ');
   }
 
   void _scrollToSection(Section sec) {
@@ -244,14 +248,9 @@ class _SongPageState extends State<_SongPage> {
     }
 
     return Column(children: [
-      // Título completo (el de la barra superior se recorta para no tapar el
-      // selector de tonalidad).
+      // Solo tono y BPM: el titulo ya esta en la barra superior.
       Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
-        child: Text(widget.song.title, textAlign: TextAlign.center, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
-      ),
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         child: Text(_metaLine(), textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
       ),
       // Mapa de la canción: una ficha por aparición, con el contador de
@@ -301,6 +300,8 @@ class _SongPageState extends State<_SongPage> {
                     american: widget.config.americanNotation,
                     controller: _scrollController,
                     sectionKeys: _sectionKeys,
+                    autoScroll: widget.config.autoScroll,
+                    autoScrollSpeed: widget.config.autoScrollSpeed,
                   ),
       ),
     ]);

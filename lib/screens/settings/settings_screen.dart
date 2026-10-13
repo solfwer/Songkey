@@ -46,7 +46,7 @@ class SettingsScreen extends StatelessWidget {
         ListTile(
           leading: const Icon(Icons.ios_share, color: AppColors.accent),
           title: const Text('Compartir biblioteca'),
-          subtitle: const Text('Envía todas tus canciones y grupos a otra persona'),
+          subtitle: const Text('Comparte tus canciones o guarda una copia en el telfono'),
           onTap: () => shareLibrary(context, store),
         ),
         ListTile(

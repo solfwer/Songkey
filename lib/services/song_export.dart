@@ -152,15 +152,34 @@ Future<void> shareSongText(BuildContext context, Song song, {int semitones = 0, 
   }
 }
 
-/// Comparte la canción como PDF.
+/// Comparte la cancion como PDF o la guarda en el dispositivo.
 Future<void> shareSongPdf(BuildContext context, Song song, {int semitones = 0, bool lyricsOnly = false}) async {
-  final origin = shareOrigin(context);
+  final opcion = await askShareOrSave(context, que: 'el PDF');
+  if (opcion == null) return;
+
   try {
     final bytes = buildSongPdf(song, semitones: semitones, lyricsOnly: lyricsOnly);
+    if (opcion) {
+      // Guardar en el telefono
+      final nombre = datedFileName('${song.title}_${transposeChord(song.key, semitones)}', 'pdf');
+      final ruta = await saveBytesToDevice(bytes: bytes, fileName: nombre, mimeType: 'application/pdf');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(ruta != null ? 'PDF guardado: $ruta' : 'No se pudo guardar el PDF.'),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+      return;
+    }
+
+    // Compartir por el panel del sistema
+    final origin = shareOrigin(context);
     final file = await tempPdfFile('${song.title}_tono_${transposeChord(song.key, semitones)}', bytes);
     await Share.shareXFiles(
       [XFile(file.path, mimeType: 'application/pdf')],
-      text: '${song.title} · Tono ${transposeChord(song.key, semitones)}',
+      text: '${song.title} - Tono ${transposeChord(song.key, semitones)}',
       sharePositionOrigin: origin,
     );
   } catch (e) {

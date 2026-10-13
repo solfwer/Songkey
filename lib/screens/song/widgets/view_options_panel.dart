@@ -240,7 +240,7 @@ class ViewOptionsPanel extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.picture_as_pdf, color: AppColors.warm),
               title: const Text('Exportar PDF'),
-              subtitle: const Text('Canción en el tono actual, lista para imprimir'),
+              subtitle: const Text('Cancion en el tono actual; puedes compartirla o guardarla en el telfono'),
               onTap: () async {
                 Navigator.pop(context);
                 await shareSongPdf(hostContext, song, semitones: config.shiftFor(song.id), lyricsOnly: config.lyricsOnly);

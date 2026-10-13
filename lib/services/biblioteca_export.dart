@@ -136,9 +136,27 @@ ImportResult mergeLibrary(AppState current, String raw, {bool updateExisting = f
   return (newGroups: newGroups, newSongs: newSongs, added: added, skipped: skipped, duplicateSongs: [], updatedSongs: updatedSongs);
 }
 
-/// Comparte la biblioteca por el panel de compartir del sistema.
+/// Comparte la biblioteca o la guarda en el dispositivo (a eleccion del usuario).
 Future<void> shareLibrary(BuildContext context, Store store) async {
   final messenger = ScaffoldMessenger.of(context);
+  final opcion = await askShareOrSave(context, que: 'la biblioteca');
+  if (opcion == null) return;
+
+  if (opcion) {
+    // Guardar en el telefono
+    final bytes = utf8.encode(encodeLibrary(store.state));
+    final nombre = datedFileName('Songkey_biblioteca', 'json');
+    final ruta = await saveBytesToDevice(bytes: bytes, fileName: nombre, mimeType: 'application/json');
+    if (!context.mounted) return;
+    if (ruta != null) {
+      messenger.showSnackBar(SnackBar(content: Text('Biblioteca guardada: $ruta'), duration: const Duration(seconds: 5)));
+    } else {
+      messenger.showSnackBar(const SnackBar(content: Text('No se pudo guardar el archivo.')));
+    }
+    return;
+  }
+
+  // Compartir por el panel del sistema
   final origin = shareOrigin(context);
   try {
     final dir = await getTemporaryDirectory();
