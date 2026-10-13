@@ -7,7 +7,6 @@
 import 'package:flutter/material.dart';
 
 import '../../data/chord_parser.dart';
-import '../../data/format.dart';
 import '../../data/store.dart';
 import '../../models/app_state.dart';
 import '../../models/song.dart';
@@ -15,6 +14,7 @@ import '../../theme.dart';
 import 'song_editor_page.dart';
 import 'widgets/compact_song_view.dart';
 import 'widgets/song_view.dart';
+import 'widgets/metronome_controls.dart';
 import 'widgets/view_options_panel.dart';
 
 class SongScreen extends StatefulWidget {
@@ -35,6 +35,10 @@ class _SongScreenState extends State<SongScreen> {
   );
   final _scaffoldKey = GlobalKey<ScaffoldState>();
 
+  /// Metronomo: los ajustes se comparten entre canciones, pero el BPM se
+  /// adapta al de la cancion cuando esta lo tiene definido.
+  late final MetronomeController _metro;
+
   // Navegación por deslizamiento entre canciones de un setlist.
   PageController? _pageController;
   int _pageIndex = 0;
@@ -43,6 +47,7 @@ class _SongScreenState extends State<SongScreen> {
   @override
   void initState() {
     super.initState();
+    _metro = MetronomeController(widget.store);
     final s = widget.store.state;
     final ids = _setlistSongIds(s);
     var idx = ids.indexOf(widget.songId);
@@ -58,7 +63,7 @@ class _SongScreenState extends State<SongScreen> {
 
   @override
   void dispose() {
-    _pageController?.dispose();
+    _metro.dispose();
     super.dispose();
   }
 
@@ -103,14 +108,22 @@ class _SongScreenState extends State<SongScreen> {
     final swipe = ids.length > 1;
     final displayed = swipe ? (s.songs.where((x) => x.id == _visibleSongId).firstOrNull ?? song) : song;
 
+    // El BPM del metrónomo se adapta a esta canción (si tiene BPM definido).
+    _metro.syncWithSong(displayed);
+
+    // La barra del metrónomo solo se ve mientras está sonando.
+    final metroBar = ListenableBuilder(
+      listenable: _metro,
+      builder: (context, _) => _metro.activo ? MetronomeBar(controller: _metro) : const SizedBox.shrink(),
+    );
+
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
         title: Text(displayed.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17)),
         actions: [
           _KeySelector(
-            song: displayed,
-            value: config.shiftFor(displayed.id) == 0 ? null : sharpen(transposeChord(displayed.key, config.shiftFor(displayed.id))),
+            currentKey: sharpen(transposeChord(displayed.key, config.shiftFor(displayed.id))),
             american: config.americanNotation,
             onSelected: (k) => setState(() => config.setShift(displayed.id, semitoneShift(displayed.key, k))),
           ),
@@ -121,6 +134,8 @@ class _SongScreenState extends State<SongScreen> {
             color: config.autoScroll ? AppColors.accent : null,
             onPressed: () => setState(() => config.autoScroll = !config.autoScroll),
           ),
+          // Metrónomo.
+          MetronomeButton(controller: _metro),
           IconButton(icon: const Icon(Icons.tune), tooltip: 'Opciones de vista', onPressed: () => _scaffoldKey.currentState?.openEndDrawer()),
         ],
       ),
@@ -136,45 +151,50 @@ class _SongScreenState extends State<SongScreen> {
         },
         onDelete: () => _delete(displayed),
       ),
-      body: swipe
-          ? PageView.builder(
-              controller: _pageController,
-              itemCount: ids.length,
-              onPageChanged: _onPageChanged,
-              itemBuilder: (context, i) {
-                final pageSong = s.songs.where((x) => x.id == ids[i]).firstOrNull;
-                if (pageSong == null) return const SizedBox.shrink();
-                return _SongPage(song: pageSong, store: widget.store, config: config);
-              },
-            )
-          : _SongPage(song: displayed, store: widget.store, config: config),
+      body: Column(children: [
+        metroBar,
+        Expanded(
+          child: swipe
+              ? PageView.builder(
+                  controller: _pageController,
+                  itemCount: ids.length,
+                  onPageChanged: _onPageChanged,
+                  itemBuilder: (context, i) {
+                    final pageSong = s.songs.where((x) => x.id == ids[i]).firstOrNull;
+                    if (pageSong == null) return const SizedBox.shrink();
+                    return _SongPage(song: pageSong, store: widget.store, config: config);
+                  },
+                )
+              : _SongPage(song: displayed, store: widget.store, config: config),
+        ),
+      ]),
     );
   }
 }
 
-/// Selector desplegable de tonalidad (12 tonos) en la barra superior.
-/// [value] siempre viene con escritura de sostenidos para cuadrar con los items.
-/// Si [value] es null, se muestra la entrada "Original" (sin transponer).
+/// Selector desplegable de tonalidad: muestra siempre el tono actual
+/// (el de la cancin o el transpuesto) y permite cambiarlo entre los 12 tonos.
+/// [currentKey] va en escritura de sostenidos para cuadrar con los items.
 class _KeySelector extends StatelessWidget {
-  final Song song;
-  final String? value;
+  final String currentKey;
   final bool american;
   final ValueChanged<String> onSelected;
-  const _KeySelector({required this.song, required this.value, required this.american, required this.onSelected});
+  const _KeySelector({super.key, required this.currentKey, required this.american, required this.onSelected});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: DropdownButtonHideUnderline(
-        child: DropdownButton<String?>(
-          value: value,
+        child: DropdownButton<String>(
+          value: currentKey,
           icon: const Icon(Icons.keyboard_arrow_down, size: 20),
-          onChanged: (k) => onSelected(k ?? song.key),
+          onChanged: (k) {
+            if (k != null) onSelected(k);
+          },
           items: [
-            const DropdownMenuItem<String?>(value: null, child: Text('Original', style: TextStyle(fontWeight: FontWeight.bold))),
             for (final k in twelveKeys)
-              DropdownMenuItem<String?>(value: k, child: Text(notateChord(k, american: american), style: const TextStyle(fontWeight: FontWeight.bold))),
+              DropdownMenuItem<String>(value: k, child: Text(notateChord(k, american: american), style: const TextStyle(fontWeight: FontWeight.bold))),
           ],
         ),
       ),
@@ -205,17 +225,6 @@ class _SongPageState extends State<_SongPage> {
     super.dispose();
   }
 
-  String _displayedKey() =>
-      notateChord(sharpen(transposeChord(widget.song.key, widget.config.shiftFor(widget.song.id))), american: widget.config.americanNotation);
-
-  String _metaLine() {
-    // Solo tono y BPM: el resto se ve al editar la cancin.
-    final parts = <String>[
-      'Tono: ${_displayedKey()}',
-      if (widget.song.bpm != null) '${widget.song.bpm} BPM',
-    ];
-    return parts.join('  ');
-  }
 
   void _scrollToSection(Section sec) {
     final ctx = _sectionKeys[sec.id]?.currentContext;
@@ -248,11 +257,6 @@ class _SongPageState extends State<_SongPage> {
     }
 
     return Column(children: [
-      // Solo tono y BPM: el titulo ya esta en la barra superior.
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        child: Text(_metaLine(), textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
-      ),
       // Mapa de la canción: una ficha por aparición, con el contador de
       // repeticiones; al tocar una se salta a ella.
       Padding(

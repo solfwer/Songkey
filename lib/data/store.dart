@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/app_state.dart';
+import '../services/metronome.dart' show Subdivision;
 import 'seed.dart';
 
 /// Estado de la app + persistencia local (SharedPreferences/JSON).
@@ -28,6 +29,15 @@ class Store extends ChangeNotifier {
   /// Vista compacta: secciones nicas una sola vez (sin repeticiones).
   bool compactView = false;
 
+  // --- Metrnomo ---
+  int metroBpm = 120;
+  int metroBeats = 4;
+  int metroBeatUnit = 4;
+  int metroSub = 0;
+  bool metroAccent = true;
+  bool metroSound = true;
+  bool metroVib = true;
+
   bool get hasAccount => username.isNotEmpty && _password.isNotEmpty;
 
   Future<void> load() async {
@@ -49,6 +59,13 @@ class Store extends ChangeNotifier {
     defaultLyricsOnly = prefs.getBool('songkey-lyricsonly') ?? false;
     editorVisualMode = prefs.getBool('songkey-editorvisual') ?? true;
     compactView = prefs.getBool('songkey-compact') ?? false;
+    metroBpm = prefs.getInt('songkey-metro-bpm') ?? 120;
+    metroBeats = prefs.getInt('songkey-metro-beats') ?? 4;
+    metroBeatUnit = prefs.getInt('songkey-metro-unit') ?? 4;
+    metroSub = prefs.getInt('songkey-metro-sub') ?? 0;
+    metroAccent = prefs.getBool('songkey-metro-accent') ?? true;
+    metroSound = prefs.getBool('songkey-metro-sound') ?? true;
+    metroVib = prefs.getBool('songkey-metro-vib') ?? true;
     notifyListeners();
   }
 
@@ -121,6 +138,48 @@ class Store extends ChangeNotifier {
   void setCompactView(bool v) {
     compactView = v;
     SharedPreferences.getInstance().then((p) => p.setBool('songkey-compact', v));
+    notifyListeners();
+  }
+
+  // --- Metrnomo ---
+  void setMetroBpm(int v) {
+    metroBpm = v;
+    SharedPreferences.getInstance().then((p) => p.setInt('songkey-metro-bpm', v));
+    notifyListeners();
+  }
+
+  void setMetroTime(int beats, int unit) {
+    metroBeats = beats;
+    metroBeatUnit = unit;
+    final prefs = SharedPreferences.getInstance();
+    prefs.then((p) {
+      p.setInt('songkey-metro-beats', beats);
+      p.setInt('songkey-metro-unit', unit);
+    });
+    notifyListeners();
+  }
+
+  void setMetroSubdivision(Subdivision s) {
+    metroSub = s.index;
+    SharedPreferences.getInstance().then((p) => p.setInt('songkey-metro-sub', s.index));
+    notifyListeners();
+  }
+
+  void setMetroAccent(bool v) {
+    metroAccent = v;
+    SharedPreferences.getInstance().then((p) => p.setBool('songkey-metro-accent', v));
+    notifyListeners();
+  }
+
+  void setMetroSound(bool v) {
+    metroSound = v;
+    SharedPreferences.getInstance().then((p) => p.setBool('songkey-metro-sound', v));
+    notifyListeners();
+  }
+
+  void setMetroVibration(bool v) {
+    metroVib = v;
+    SharedPreferences.getInstance().then((p) => p.setBool('songkey-metro-vib', v));
     notifyListeners();
   }
 
