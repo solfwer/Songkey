@@ -10,14 +10,22 @@ import '../../../theme.dart';
 /// Color por tipo de sección (chips y encabezados).
 Color sectionKindColor(SectionKind k) {
   switch (k) {
-    case SectionKind.verse: return AppColors.primary;
-    case SectionKind.chorus: return AppColors.warm;
-    case SectionKind.prechorus: return AppColors.accent;
-    case SectionKind.bridge: return AppColors.bridge;
-    case SectionKind.intro: return const Color(0xFFE6C15C);
-    case SectionKind.outro: return const Color(0xFFE6739F);
-    case SectionKind.ending: return const Color(0xFFE5606B);
-    case SectionKind.other: return Colors.grey;
+    case SectionKind.verse:
+      return AppColors.primary;
+    case SectionKind.chorus:
+      return AppColors.warm;
+    case SectionKind.prechorus:
+      return AppColors.accent;
+    case SectionKind.bridge:
+      return AppColors.bridge;
+    case SectionKind.intro:
+      return const Color(0xFFE6C15C);
+    case SectionKind.outro:
+      return const Color(0xFFE6739F);
+    case SectionKind.ending:
+      return const Color(0xFFE5606B);
+    case SectionKind.other:
+      return Colors.grey;
   }
 }
 
@@ -36,7 +44,14 @@ class SectionChips extends StatelessWidget {
   final double spacing;
   final double fontSize;
   final double verticalPadding;
-  const SectionChips({super.key, required this.sections, required this.alphaOf, this.onSelect, this.spacing = 8, this.fontSize = 13, this.verticalPadding = 2});
+  const SectionChips(
+      {super.key,
+      required this.sections,
+      required this.alphaOf,
+      this.onSelect,
+      this.spacing = 8,
+      this.fontSize = 13,
+      this.verticalPadding = 2});
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +68,9 @@ class SectionChips extends StatelessWidget {
           Padding(
             padding: EdgeInsets.only(right: spacing),
             child: Tooltip(
-              message: counts[sec.label]! > 1 ? '${sec.label} (x${counts[sec.label]})' : sec.label,
+              message: counts[sec.label]! > 1
+                  ? '${sec.label} (x${counts[sec.label]})'
+                  : sec.label,
               child: InkResponse(
                 radius: 28,
                 onTap: onSelect == null ? null : () => onSelect!(sec),
@@ -68,14 +85,22 @@ class SectionChips extends StatelessWidget {
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: sectionKindColor(sec.kind).withValues(alpha: (alphaOf(sec) + 0.22).clamp(0.0, 1.0)),
-                        border: Border.all(color: sectionKindColor(sec.kind).withValues(alpha: 0.9), width: 1.5),
+                        color: sectionKindColor(sec.kind).withValues(
+                            alpha: (alphaOf(sec) + 0.22).clamp(0.0, 1.0)),
+                        border: Border.all(
+                            color: sectionKindColor(sec.kind)
+                                .withValues(alpha: 0.9),
+                            width: 1.5),
                       ),
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
                         child: Padding(
                           padding: const EdgeInsets.all(6),
-                          child: Text(sec.abbr.toLowerCase(), style: TextStyle(fontSize: fontSize.clamp(9.0, 13.0), fontWeight: FontWeight.bold, color: sectionKindColor(sec.kind))),
+                          child: Text(sec.abbr.toLowerCase(),
+                              style: TextStyle(
+                                  fontSize: fontSize.clamp(9.0, 13.0),
+                                  fontWeight: FontWeight.bold,
+                                  color: sectionKindColor(sec.kind))),
                         ),
                       ),
                     ),
@@ -84,9 +109,16 @@ class SectionChips extends StatelessWidget {
                         right: 0,
                         bottom: 0,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                          decoration: BoxDecoration(color: sectionKindColor(sec.kind), borderRadius: BorderRadius.circular(7)),
-                          child: Text('x${counts[sec.label]}', style: const TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.black)),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                              color: sectionKindColor(sec.kind),
+                              borderRadius: BorderRadius.circular(7)),
+                          child: Text('x${counts[sec.label]}',
+                              style: const TextStyle(
+                                  fontSize: 8,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black)),
                         ),
                       ),
                   ]),
@@ -118,7 +150,16 @@ class SongLineView extends StatelessWidget {
 
   /// true = notación americana (C, G, Am); false = latina (Do, Sol, Lam).
   final bool american;
-  const SongLineView({super.key, required this.line, required this.lyricsOnly, required this.semitones, required this.fontSize, this.chordScale = 0.85, this.lineHeight = 1.35, this.chordLineHeight = 1.1, this.american = true});
+  const SongLineView(
+      {super.key,
+      required this.line,
+      required this.lyricsOnly,
+      required this.semitones,
+      required this.fontSize,
+      this.chordScale = 0.85,
+      this.lineHeight = 1.35,
+      this.chordLineHeight = 1.1,
+      this.american = true});
 
   /// Línea compuesta únicamente por acordes y separadores (`|`, `-`, `–`):
   /// es una "progresión" (intro, interludio) y se pinta en una sola fila.
@@ -135,7 +176,8 @@ class SongLineView extends StatelessWidget {
       if (_isChordRow) return const SizedBox.shrink();
       return Text(
         line.map((x) => x.text).join().replaceAll(RegExp(r'\s+'), ' ').trim(),
-        style: TextStyle(fontSize: fontSize, height: lineHeight, color: Colors.white),
+        style: TextStyle(
+            fontSize: fontSize, height: lineHeight, color: Colors.white),
       );
     }
     if (_isChordRow) {
@@ -145,13 +187,18 @@ class SongLineView extends StatelessWidget {
           children: [
             for (final seg in line) ...[
               TextSpan(
-                text: notateChord(transposeChord(seg.chord!, semitones), american: american),
-                style: TextStyle(fontSize: fontSize * chordScale, fontWeight: FontWeight.bold, color: chordColor),
+                text: notateChord(transposeChord(seg.chord!, semitones),
+                    american: american),
+                style: TextStyle(
+                    fontSize: fontSize * chordScale,
+                    fontWeight: FontWeight.bold,
+                    color: chordColor),
               ),
               if (seg.text.isNotEmpty)
                 TextSpan(
                   text: seg.text,
-                  style: TextStyle(fontSize: fontSize * chordScale, color: Colors.white38),
+                  style: TextStyle(
+                      fontSize: fontSize * chordScale, color: Colors.white38),
                 ),
             ],
           ],
@@ -166,10 +213,27 @@ class SongLineView extends StatelessWidget {
       for (final seg in line)
         Padding(
           padding: margen,
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(seg.chord != null ? notateChord(transposeChord(seg.chord!, semitones), american: american) : (line.any((x) => x.chord != null) ? ' ' : ''), style: TextStyle(fontSize: fontSize * chordScale, height: chordLineHeight, fontWeight: FontWeight.bold, color: const Color(0xFF5AD1E6), fontFamily: 'monospace')),
-            Text(seg.text.isEmpty ? ' ' : seg.text, style: TextStyle(fontSize: fontSize, height: lineHeight, color: Colors.white)),
-          ]),
+          child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                    seg.chord != null
+                        ? notateChord(transposeChord(seg.chord!, semitones),
+                            american: american)
+                        : (line.any((x) => x.chord != null) ? ' ' : ''),
+                    style: TextStyle(
+                        fontSize: fontSize * chordScale,
+                        height: chordLineHeight,
+                        fontWeight: FontWeight.bold,
+                        color: const Color(0xFF5AD1E6),
+                        fontFamily: 'monospace')),
+                Text(seg.text.isEmpty ? ' ' : seg.text,
+                    style: TextStyle(
+                        fontSize: fontSize,
+                        height: lineHeight,
+                        color: Colors.white)),
+              ]),
         ),
     ]);
   }
@@ -181,15 +245,26 @@ class SectionHeader extends StatelessWidget {
   final double fontSize;
   final double gap;
   final double letterSpacing;
-  const SectionHeader({super.key, required this.sec, this.fontSize = 11, this.gap = 8, this.letterSpacing = 1.5});
+  const SectionHeader(
+      {super.key,
+      required this.sec,
+      this.fontSize = 11,
+      this.gap = 8,
+      this.letterSpacing = 1.5});
 
   @override
   Widget build(BuildContext context) {
     return Row(children: [
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-        decoration: BoxDecoration(color: sectionKindColor(sec.kind).withValues(alpha: 0.2), borderRadius: BorderRadius.circular(6)),
-        child: Text(sec.abbr, style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.bold, color: sectionKindColor(sec.kind))),
+        decoration: BoxDecoration(
+            color: sectionKindColor(sec.kind).withValues(alpha: 0.2),
+            borderRadius: BorderRadius.circular(6)),
+        child: Text(sec.abbr,
+            style: TextStyle(
+                fontSize: fontSize,
+                fontWeight: FontWeight.bold,
+                color: sectionKindColor(sec.kind))),
       ),
       SizedBox(width: gap),
       Expanded(
@@ -197,7 +272,10 @@ class SectionHeader extends StatelessWidget {
           sec.label.toUpperCase(),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: Colors.grey, fontSize: fontSize, letterSpacing: letterSpacing),
+          style: TextStyle(
+              color: Colors.grey,
+              fontSize: fontSize,
+              letterSpacing: letterSpacing),
         ),
       ),
     ]);
@@ -226,7 +304,17 @@ class SongBodyList extends StatefulWidget {
 
   /// Velocidad de auto-scroll en px/s.
   final double autoScrollSpeed;
-  const SongBodyList({super.key, required this.sections, required this.lyricsOnly, required this.semitones, required this.fontSize, this.american = true, this.controller, this.sectionKeys, this.autoScroll = false, this.autoScrollSpeed = 25.0});
+  const SongBodyList(
+      {super.key,
+      required this.sections,
+      required this.lyricsOnly,
+      required this.semitones,
+      required this.fontSize,
+      this.american = true,
+      this.controller,
+      this.sectionKeys,
+      this.autoScroll = false,
+      this.autoScrollSpeed = 25.0});
 
   @override
   State<SongBodyList> createState() => _SongBodyListState();
@@ -246,7 +334,8 @@ class _SongBodyListState extends State<SongBodyList> {
   @override
   void didUpdateWidget(covariant SongBodyList oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.autoScroll != widget.autoScroll || oldWidget.autoScrollSpeed != widget.autoScrollSpeed) {
+    if (oldWidget.autoScroll != widget.autoScroll ||
+        oldWidget.autoScrollSpeed != widget.autoScrollSpeed) {
       _syncTimer();
     }
   }
@@ -282,25 +371,34 @@ class _SongBodyListState extends State<SongBodyList> {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(controller: widget.controller, padding: const EdgeInsets.all(16), children: [
-      for (final sec in widget.sections) ...[
-        Padding(
-          key: widget.sectionKeys?[sec.id],
-          padding: EdgeInsets.zero,
-          child: SectionHeader(sec: sec),
-        ),
-        const SizedBox(height: 6),
-        for (final line in sec.lines)
-          line.isEmpty
-              ? const SizedBox(height: 10)
-              : Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 1),
-                  child: SongLineView(line: line, lyricsOnly: widget.lyricsOnly, semitones: widget.semitones, fontSize: widget.fontSize, american: widget.american),
-                ),
-        const SizedBox(height: 26),
-      ],
-      if (widget.sections.isEmpty) const Text('Esta canción aún no tiene letra.'),
-    ]);
+    return ListView(
+        controller: widget.controller,
+        padding: const EdgeInsets.all(16),
+        children: [
+          for (final sec in widget.sections) ...[
+            Padding(
+              key: widget.sectionKeys?[sec.id],
+              padding: EdgeInsets.zero,
+              child: SectionHeader(sec: sec),
+            ),
+            const SizedBox(height: 6),
+            for (final line in sec.lines)
+              line.isEmpty
+                  ? const SizedBox(height: 10)
+                  : Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 1),
+                      child: SongLineView(
+                          line: line,
+                          lyricsOnly: widget.lyricsOnly,
+                          semitones: widget.semitones,
+                          fontSize: widget.fontSize,
+                          american: widget.american),
+                    ),
+            const SizedBox(height: 26),
+          ],
+          if (widget.sections.isEmpty)
+            const Text('Esta canción aún no tiene letra.'),
+        ]);
   }
 }
 
@@ -311,7 +409,6 @@ bool isChordRowLine(SongLine line) {
   final sep = RegExp(r'^[\s|/|.-]*$');
   return line.every((s) => s.chord != null && sep.hasMatch(s.text));
 }
-
 
 /// Una "pgina" ya distribuida en columnas con el tamao elegido.
 typedef SongPage = ({List<List<Section>> columns, double fontSize});
@@ -351,13 +448,15 @@ class AutoFitSongBody extends StatelessWidget {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
-        final pages = _computePages(constraints.maxWidth, constraints.maxHeight);
+        final pages =
+            _computePages(constraints.maxWidth, constraints.maxHeight);
         if (pages.length <= 1) {
           return _renderPage(pages.first, constraints.maxWidth);
         }
         return PageView.builder(
           itemCount: pages.length,
-          itemBuilder: (context, i) => _renderPage(pages[i], constraints.maxWidth),
+          itemBuilder: (context, i) =>
+              _renderPage(pages[i], constraints.maxWidth),
         );
       },
     );
@@ -396,7 +495,8 @@ class AutoFitSongBody extends StatelessWidget {
       }
       final text = line.map((e) => e.text).join();
       final n = _wrappedLines(text, width, fs);
-      h += (hasChords ? _chordLineHeight(fs) : 0) + n * _lyricLineHeight(fs) + 2;
+      h +=
+          (hasChords ? _chordLineHeight(fs) : 0) + n * _lyricLineHeight(fs) + 2;
     }
     return h + 20; // margen entre secciones
   }
@@ -424,14 +524,16 @@ class AutoFitSongBody extends StatelessWidget {
       for (final cols in const [1, 2, 3]) {
         final width = (availW - _gap * (cols - 1)) / cols;
         final balanced = _balanceFor(cols, group, width, fs);
-        final fits = balanced.every((c) => c.isEmpty || _columnsHeight(c, width, fs) <= availH);
+        final fits = balanced
+            .every((c) => c.isEmpty || _columnsHeight(c, width, fs) <= availH);
         if (fits) return (columns: balanced, fontSize: fs);
       }
     }
     return null;
   }
 
-  List<List<Section>> _balanceFor(int columns, List<Section> group, double width, double fs) {
+  List<List<Section>> _balanceFor(
+      int columns, List<Section> group, double width, double fs) {
     if (columns <= 1) return [group];
     final cols = List.generate(columns, (_) => <Section>[]);
     final heights = List.filled(columns, 0.0);
@@ -464,7 +566,12 @@ class AutoFitSongBody extends StatelessWidget {
     var current = <Section>[];
     void closeCurrent() {
       if (current.isEmpty) return;
-      pages.add(_bestConfig(current, availW, availH) ?? (columns: _balanceFor(3, current, (availW - _gap * 2) / 3, minFontSize), fontSize: minFontSize));
+      pages.add(_bestConfig(current, availW, availH) ??
+          (
+            columns:
+                _balanceFor(3, current, (availW - _gap * 2) / 3, minFontSize),
+            fontSize: minFontSize
+          ));
       current = <Section>[];
     }
 
@@ -479,7 +586,11 @@ class AutoFitSongBody extends StatelessWidget {
       }
     }
     closeCurrent();
-    return pages.isEmpty ? [(columns: [sections], fontSize: minFontSize)] : pages;
+    return pages.isEmpty
+        ? [
+            (columns: [sections], fontSize: minFontSize)
+          ]
+        : pages;
   }
 
   // -------------------------------------------------------------- dibujado
@@ -500,14 +611,21 @@ class AutoFitSongBody extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     for (final sec in cols[i]) ...[
-                      SectionHeader(sec: sec, fontSize: (fs * 0.72).clamp(9.0, 13.0)),
+                      SectionHeader(
+                          sec: sec, fontSize: (fs * 0.72).clamp(9.0, 13.0)),
                       const SizedBox(height: 4),
                       for (final line in sec.lines)
                         line.isEmpty
                             ? const SizedBox(height: 8)
                             : Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 1),
-                                child: SongLineView(line: line, lyricsOnly: lyricsOnly, semitones: semitones, fontSize: fs, american: american),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 1),
+                                child: SongLineView(
+                                    line: line,
+                                    lyricsOnly: lyricsOnly,
+                                    semitones: semitones,
+                                    fontSize: fs,
+                                    american: american),
                               ),
                       const SizedBox(height: 20),
                     ],

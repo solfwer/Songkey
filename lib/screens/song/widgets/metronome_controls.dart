@@ -29,8 +29,11 @@ class MetronomeController extends ChangeNotifier {
           accent: store.metroAccent,
           sound: store.metroSound,
           vibration: store.metroVib,
+          clickSound: ClickSound.values[store.metroClick.clamp(0, ClickSound.values.length - 1)],
         ) {
     metronome = Metronome(settings: settings);
+    // Preparamos el sonido al crear el controlador; si el usuario le da play
+    // antes de que est listo, toggle() espera a que termine.
     metronome.preparar();
     metronome.onBeat = (b, a) {
       beat = b;
@@ -38,6 +41,9 @@ class MetronomeController extends ChangeNotifier {
       notifyListeners();
     };
   }
+
+  /// true mientras se preparan los archivos de sonido.
+  bool get preparando => metronome.preparando;
 
   /// Ajusta el BPM al de la cancin, pero solo al cambiar de cancin y solo si
   /// la cancin tiene BPM definido (si no, se respeta el ltimo usado).
@@ -90,22 +96,48 @@ class MetronomeController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Cambia el tipo de sonido del click (regenera los archivos).
+  Future<void> setClickSound(ClickSound v) async {
+    if (settings.clickSound == v) return;
+    settings.clickSound = v;
+    store.setMetroClick(v);
+    notifyListeners();
+    await metronome.regenerarSonido();
+    // Si estaba sonando, reiniciamos con el sonido nuevo.
+    if (activo) {
+      metronome.restart();
+    }
+    notifyListeners();
+  }
+
   void setVibration(bool v) {
     settings.vibration = v;
     store.setMetroVibration(v);
     notifyListeners();
   }
 
-  void toggle() {
+  /// Arranca o para. Si el sonido an se est preparando, espera.
+  Future<void> toggle() async {
     if (activo) {
       metronome.stop();
       activo = false;
-    } else {
-      metronome.start();
-      activo = true;
+      notifyListeners();
+      return;
     }
+    if (settings.sound && !metronome.activo) {
+      final listo = await metronome.preparar();
+      if (!listo) {
+        // El sonido no est disponible: avisamos pero seguimos (vibra).
+        onSonidoNoDisponible?.call();
+      }
+    }
+    metronome.start();
+    activo = true;
     notifyListeners();
   }
+
+  /// Aviso cuando el sonido no se pudo preparar (para mostrar un mensaje).
+  VoidCallback? onSonidoNoDisponible;
 
   void stop() {
     if (activo) {
@@ -122,24 +154,92 @@ class MetronomeController extends ChangeNotifier {
   }
 }
 
+/// Botón del AppBar: menú rápido con BPM, compás y play/stop, más el panel.
 class MetronomeButton extends StatelessWidget {
   final MetronomeController controller;
 
   const MetronomeButton({super.key, required this.controller});
+
+  /// BPM de uso rápido en el menú.
+  static const _bpsRapidos = [60, 70, 80, 90, 100, 110, 120, 140, 160];
+
+  static const _acentoColor = Color(0xFF5AD1E6);
+
+  Widget _marca(bool ok) => ok ? const Icon(Icons.check, size: 18, color: _acentoColor) : const SizedBox.shrink();
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: controller,
-      builder: (context, _) => IconButton(
-        icon: Icon(controller.activo ? Icons.timer : Icons.timer_outlined),
-        tooltip: controller.activo ? 'Metrónomo sonando' : 'Metrónomo',
-        color: controller.activo ? AppColorsAccent : null,
-        onPressed: () => _openSheet(context),
-      ),
+      builder: (context, _) {
+        final s = controller.settings;
+        return PopupMenuButton<String>(
+          tooltip: controller.activo ? 'Metrónomo sonando' : 'Metrónomo',
+          icon: Icon(controller.activo ? Icons.timer : Icons.timer_outlined),
+          color: controller.activo ? _acentoColor : null,
+          itemBuilder: (context) => [
+            PopupMenuItem<String>(
+              value: 'play',
+              child: ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(controller.activo ? Icons.stop : Icons.play_arrow),
+                title: Text(controller.activo ? 'Parar' : 'Iniciar'),
+              ),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem<String>(enabled: false, child: Text('BPM')),
+            for (final bpm in _bpsRapidos)
+              PopupMenuItem<String>(
+                value: 'bpm-$bpm',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.speed, size: 18),
+                  title: Text('$bpm BPM'),
+                  trailing: _marca(s.bpm == bpm),
+                ),
+              ),
+            const PopupMenuDivider(),
+            const PopupMenuItem<String>(enabled: false, child: Text('Comps')),
+            for (final t in timeSignatures)
+              PopupMenuItem<String>(
+                value: 'compas-${t.beats}-${t.unit}',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.music_note, size: 18),
+                  title: Text(t.label),
+                  trailing: _marca(s.beatsPerBar == t.beats && s.beatUnit == t.unit),
+                ),
+              ),
+            const PopupMenuDivider(),
+            const PopupMenuItem<String>(
+              value: 'mas',
+              child: ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.tune, size: 18),
+                title: Text('Ms ajustes...'),
+              ),
+            ),
+          ],
+          onSelected: (v) async {
+            if (v == 'play') {
+              await controller.toggle();
+            } else if (v == 'mas') {
+              _openSheet(context);
+            } else if (v.startsWith('bpm-')) {
+              controller.setBpm(int.parse(v.substring(4)));
+            } else if (v.startsWith('compas-')) {
+              final p = v.split('-');
+              controller.setCompas(int.parse(p[1]), int.parse(p[2]));
+            }
+          },
+        );
+      },
     );
   }
-
-  static const AppColorsAccent = Color(0xFF5AD1E6);
 
   void _openSheet(BuildContext context) {
     showModalBottomSheet(
@@ -152,6 +252,48 @@ class MetronomeButton extends StatelessWidget {
 }
 
 /// Barra compacta que se muestra mientras el metrnomo suena.
+/// Círculos de los tiempos del compás: el actual se ilumina, el del acento es
+/// ms grande y de otro color. Sirve para guiarse de un vistazo.
+class BeatDots extends StatelessWidget {
+  /// Cuntos tiempos tiene el compás (4 en 4/4, 3 en 3/4...).
+  final int beats;
+
+  /// Tiempo que est sonando ahora (0 = primero).
+  final int actual;
+
+  /// true si el click actual es el del acento.
+  final bool acento;
+
+  const BeatDots({super.key, required this.beats, required this.actual, this.acento = false});
+
+  static const _colorActivo = Color(0xFF5AD1E6);
+  static const _colorApagado = Color(0xFF3A3A44);
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < beats; i++) ...[
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 80),
+            width: i == actual && acento ? 16 : 12,
+            height: i == actual && acento ? 16 : 12,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: i == actual ? _colorActivo : _colorApagado,
+              border: Border.all(
+                color: i == actual ? _colorActivo : Colors.white24,
+                width: i == actual && acento ? 2 : 1,
+              ),
+            ),
+          ),
+          if (i < beats - 1) const SizedBox(width: 5),
+        ],
+      ],
+    );
+  }
+}
 class MetronomeBar extends StatelessWidget {
   final MetronomeController controller;
   const MetronomeBar({super.key, required this.controller});
@@ -169,15 +311,11 @@ class MetronomeBar extends StatelessWidget {
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(children: [
-              // Indicador del beat.
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 90),
-                width: 14,
-                height: 14,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: controller.acento ? const Color(0xFF5AD1E6) : Colors.white38,
-                ),
+              // Circulos: uno por tiempo del compas.
+              BeatDots(
+                beats: s.beatsPerBar,
+                actual: controller.beat,
+                acento: controller.acento,
               ),
               const SizedBox(width: 8),
               // BPM con - y +
@@ -349,8 +487,20 @@ class MetronomeSheet extends StatelessWidget {
                 value: s.sound,
                 onChanged: controller.setSound,
               ),
-              SwitchListTile(
+              // Tipo de sonido del click.
+              ListTile(
                 contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.graphic_eq),
+                title: const Text('Tipo de sonido'),
+                trailing: DropdownButton<ClickSound>(
+                  value: s.clickSound,
+                  items: [for (final c in ClickSound.values) DropdownMenuItem(value: c, child: Text(c.label))],
+                  onChanged: (v) {
+                    if (v != null) controller.setClickSound(v);
+                  },
+                ),
+              ),
+              SwitchListTile(
                 secondary: const Icon(Icons.vibration),
                 title: const Text('Vibracin'),
                 value: s.vibration,

@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/app_state.dart';
-import '../services/metronome.dart' show Subdivision;
+import '../services/metronome.dart' show ClickSound, Subdivision;
 import 'seed.dart';
 
 /// Estado de la app + persistencia local (SharedPreferences/JSON).
@@ -34,6 +34,7 @@ class Store extends ChangeNotifier {
   int metroBeats = 4;
   int metroBeatUnit = 4;
   int metroSub = 0;
+  int metroClick = 0;
   bool metroAccent = true;
   bool metroSound = true;
   bool metroVib = true;
@@ -63,6 +64,7 @@ class Store extends ChangeNotifier {
     metroBeats = prefs.getInt('songkey-metro-beats') ?? 4;
     metroBeatUnit = prefs.getInt('songkey-metro-unit') ?? 4;
     metroSub = prefs.getInt('songkey-metro-sub') ?? 0;
+    metroClick = prefs.getInt('songkey-metro-click') ?? 0;
     metroAccent = prefs.getBool('songkey-metro-accent') ?? true;
     metroSound = prefs.getBool('songkey-metro-sound') ?? true;
     metroVib = prefs.getBool('songkey-metro-vib') ?? true;
@@ -162,6 +164,12 @@ class Store extends ChangeNotifier {
   void setMetroSubdivision(Subdivision s) {
     metroSub = s.index;
     SharedPreferences.getInstance().then((p) => p.setInt('songkey-metro-sub', s.index));
+    notifyListeners();
+  }
+
+  void setMetroClick(ClickSound v) {
+    metroClick = v.index;
+    SharedPreferences.getInstance().then((p) => p.setInt('songkey-metro-click', v.index));
     notifyListeners();
   }
 
