@@ -20,7 +20,7 @@ class MetronomeController extends ChangeNotifier {
   /// Id de la ltima cancin sincronizada (para no resetear el BPM en cada build).
   String? _lastSongId;
 
-  MetronomeController(this.store)
+  MetronomeController(this.store, {Metronome? metro})
       : settings = MetronomeSettings(
           bpm: store.metroBpm,
           beatsPerBar: store.metroBeats,
@@ -31,10 +31,10 @@ class MetronomeController extends ChangeNotifier {
           vibration: store.metroVib,
           clickSound: ClickSound.values[store.metroClick.clamp(0, ClickSound.values.length - 1)],
         ) {
-    metronome = Metronome(settings: settings);
+    metronome = metro ?? Metronome(settings: settings);
     // Preparamos el sonido al crear el controlador; si el usuario le da play
     // antes de que est listo, toggle() espera a que termine.
-    metronome.preparar();
+    metronome.preparar().catchError((_) => false);
     metronome.onBeat = (b, a) {
       beat = b;
       acento = a;

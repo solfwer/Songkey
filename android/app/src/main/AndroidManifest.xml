@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Vibracin del metrnomo: algunos fabricantes (Xiaomi incluido) lo piden. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <application
         android:label="Songkey"
         android:name="${applicationName}"

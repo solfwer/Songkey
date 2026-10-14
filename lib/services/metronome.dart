@@ -1,7 +1,8 @@
 // Metrónomo: sonido, vibración e indicador visual del beat.
 //
-// Los clicks no se guardan como archivos en el repo: se generan WAV en código
-// (uno por tipo de sonido) y se escriben en la carpeta temporal la primera vez.
+// Los clicks no se guardan como archivos: se generan WAV en memoria (uno por
+// tipo de sonido) y se reproducen con BytesSource, así no dependemos de rutas
+// temporales ni de permisos de almacenamiento.
 import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
@@ -149,17 +150,30 @@ Uint8List _clickWav(ClickSound tipo, {required int milliseconds, required double
 }
 
 /// Metrónomo con sonido, vibración y aviso del beat.
+///
+/// Los clicks se generan como WAV en memoria (nada de archivos en disco) y se
+/// reproducen con `BytesSource`: así no dependemos de rutas temporales ni de
+/// permisos de almacenamiento, que es lo que haca que no sonara.
 class Metronome {
   MetronomeSettings settings;
   Metronome({MetronomeSettings? settings}) : settings = settings ?? MetronomeSettings();
 
   Timer? _timer;
   AudioPlayer? _player;
-  String? _acentoPath;
-  String? _normalPath;
+
+  /// Clips ya generados, listos para reproducir.
+  Uint8List? _acentoBytes;
+  Uint8List? _normalBytes;
+
   bool _listo = false;
   bool _preparando = false;
   int _click = 0;
+
+  /// Timbre actualmente preparado (para saber si hay que regenerar).
+  ClickSound? _timoPreparado;
+
+  /// Último error de audio (para poder diagnosticar en vez de callarse).
+  Object? ultimoError;
 
   /// Se llama en cada click con el índice de pulso dentro del compás
   /// (0 = primer tiempo) y si es el click del acento.
@@ -170,36 +184,34 @@ class Metronome {
   /// true mientras se prepara el sonido.
   bool get preparando => _preparando;
 
-  /// Prepara los archivos de sonido. Se puede llamar varias veces; devuelve
-  /// true si el sonido qued listo.
+  /// true si el sonido quedó listo para reproducir.
+  bool get listo => _listo;
+
+  /// Prepara los clips y el reproductor. Se puede llamar varias veces;
+  /// devuelve true si el sonido quedó listo.
   Future<bool> preparar() async {
-    if (_listo) return true;
+    if (_listo && _timoPreparado == settings.clickSound) return true;
     if (_preparando) return false;
     _preparando = true;
     try {
-      final dir = await getTemporaryDirectory();
-      final acento = File('${dir.path}/metro_acento.wav');
-      final normal = File('${dir.path}/metro_normal.wav');
       final sonido = settings.clickSound;
-      // El acento suena algo ms largo y fuerte que el resto.
+      // El acento suena algo más largo y fuerte que el resto.
       final msAcento = sonido == ClickSound.campana ? 300 : 60;
       final msNormal = sonido == ClickSound.campana ? 250 : 40;
-      if (!await acento.exists()) {
-        await acento.writeAsBytes(_clickWav(sonido, milliseconds: msAcento, volume: 0.95));
-      }
-      if (!await normal.exists()) {
-        await normal.writeAsBytes(_clickWav(sonido, milliseconds: msNormal, volume: 0.55));
-      }
-      _acentoPath = acento.path;
-      _normalPath = normal.path;
-      // mediaPlayer (no lowLatency): es el modo que carga rutas de disco.
-      _player = AudioPlayer(playerId: 'metronome');
+      _acentoBytes = _clickWav(sonido, milliseconds: msAcento, volume: 0.95);
+      _normalBytes = _clickWav(sonido, milliseconds: msNormal, volume: 0.55);
+      _timoPreparado = sonido;
+
+      // Un solo reproductor para toda la vida del metrónomo.
+      _player ??= AudioPlayer();
       await _player!.setPlayerMode(PlayerMode.mediaPlayer);
       await _player!.setReleaseMode(ReleaseMode.stop);
       _listo = true;
+      ultimoError = null;
       return true;
-    } catch (_) {
-      // Si el sonido no est disponible, el metrnomo sigue vibrando.
+    } catch (e) {
+      // No se calla: guardamos el error para poder mostrarlo.
+      ultimoError = e;
       _listo = false;
       return false;
     } finally {
@@ -207,14 +219,10 @@ class Metronome {
     }
   }
 
-  /// Regenera los archivos (al cambiar el tipo de sonido).
+  /// Regenera los clips (al cambiar el tipo de sonido).
   Future<void> regenerarSonido() async {
-    try {
-      final dir = await getTemporaryDirectory();
-      await File('${dir.path}/metro_acento.wav').delete();
-      await File('${dir.path}/metro_normal.wav').delete();
-    } catch (_) {}
     _listo = false;
+    _timoPreparado = null;
     await preparar();
   }
 
@@ -253,9 +261,9 @@ class Metronome {
     final acento = enPulso && settings.accent && beat == 0;
 
     if (settings.sound && _listo && _player != null) {
-      final path = acento ? _acentoPath : _normalPath;
-      if (path != null) {
-        _player!.play(DeviceFileSource(path), volume: acento ? 1.0 : 0.75);
+      final bytes = acento ? _acentoBytes : _normalBytes;
+      if (bytes != null) {
+        _player!.play(BytesSource(bytes), volume: acento ? 1.0 : 0.75);
       }
     }
     if (settings.vibration) {

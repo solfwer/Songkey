@@ -7,6 +7,30 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// Metrnomo de mentira para poder testear sin plugin de audio.
+class _MetroFalso extends Metronome {
+  _MetroFalso([MetronomeSettings? s]) : super(settings: s);
+  int arranques = 0;
+  @override
+  Future<bool> preparar() async => true;
+  @override
+  void start() => arranques++;
+  @override
+  void stop() {}
+  @override
+  void restart() => arranques++;
+  @override
+  Future<void> regenerarSonido() async {}
+  @override
+  Future<void> dispose() async {}
+}
+
+/// Crea un controlador con metrnomo falso (sin audio real).
+MetronomeController _ctrl(Store store) {
+  final c = MetronomeController(store, metro: _MetroFalso());
+  return c;
+}
+
 void main() {
   setUpAll(() async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
@@ -60,7 +84,7 @@ void main() {
   group('MetronomeController', () {
     test('arranca con los ajustes guardados en el Store', () {
       final store = Store()..metroBpm = 95;
-      final c = MetronomeController(store);
+      final c = _ctrl(store);
       expect(c.settings.bpm, 95);
       expect(c.settings.beatsPerBar, store.metroBeats);
       c.dispose();
@@ -68,7 +92,7 @@ void main() {
 
     test('setBpm limita a un rango razonable', () {
       final store = Store();
-      final c = MetronomeController(store);
+      final c = _ctrl(store);
       c.setBpm(0);
       expect(c.settings.bpm, 30);
       c.setBpm(1000);
@@ -80,7 +104,7 @@ void main() {
 
     test('el BPM se adapta al de la cancion', () {
       final store = Store();
-      final c = MetronomeController(store);
+      final c = _ctrl(store);
       c.settings.bpm = 80;
       // Cancion sin BPM: se respeta el que tenas.
       c.syncWithSong(Song(id: 's1', title: 'Sin bpm', key: 'C', body: 'x'));
@@ -93,7 +117,7 @@ void main() {
 
     test('no resetea el BPM al reconstruir la misma cancin', () {
       final store = Store();
-      final c = MetronomeController(store);
+      final c = _ctrl(store);
       c.syncWithSong(Song(id: 's1', title: 'Con bpm', key: 'C', body: 'x', bpm: 100));
       expect(c.settings.bpm, 100);
       // El usuario lo cambia a mano...
@@ -106,7 +130,7 @@ void main() {
 
     test('cambiar comps y subdivisin actualiza los ajustes', () {
       final store = Store();
-      final c = MetronomeController(store);
+      final c = _ctrl(store);
       c.setCompas(3, 4);
       expect(c.settings.beatsPerBar, 3);
       expect(store.metroBeats, 3);
@@ -118,7 +142,7 @@ void main() {
 
     test('se puede apagar sonido y vibracin por separado', () {
       final store = Store();
-      final c = MetronomeController(store);
+      final c = _ctrl(store);
       c.setSound(false);
       expect(c.settings.sound, isFalse);
       expect(c.settings.vibration, isTrue);
@@ -131,7 +155,7 @@ void main() {
 
     test('el acento se puede desactivar', () {
       final store = Store();
-      final c = MetronomeController(store);
+      final c = _ctrl(store);
       expect(c.settings.accent, isTrue);
       c.setAccent(false);
       expect(c.settings.accent, isFalse);
@@ -141,7 +165,7 @@ void main() {
 
   testWidgets('MetronomeBar muestra BPM, comps y subdivisin', (tester) async {
     final store = Store();
-    final c = MetronomeController(store);
+    final c = _ctrl(store);
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: MetronomeBar(controller: c)),
     ));
