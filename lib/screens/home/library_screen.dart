@@ -30,7 +30,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   List<Song> _applyFilters(List<Song> all) {
     final f = q.trim().toLowerCase();
-    return f.isEmpty ? all : all.where((x) => x.title.toLowerCase().contains(f)).toList();
+    if (f.isEmpty) return all;
+    return all.where((x) {
+      final title = x.title.toLowerCase();
+      final author = (x.author ?? '').toLowerCase();
+      final body = x.body.toLowerCase();
+      return title.contains(f) || author.contains(f) || body.contains(f);
+    }).toList();
   }
 
   void _handleAdd(_AddOption opt) {
@@ -133,13 +139,35 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         final uniqueAbbrs = secs.map((x) => x.abbr).toSet().toList();
                         final group = s.groups.where((g) => g.id == song.groupId).map((g) => g.name).cast<String?>().firstWhere((_) => true, orElse: () => null);
                         final duration = formatDuration(song.durationSec);
+                        // ¿Dónde coincide la búsqueda?
+                        final f = q.trim().toLowerCase();
+                        final inTitle = song.title.toLowerCase().contains(f);
+                        final inAuthor = (song.author ?? '').toLowerCase().contains(f);
+                        final inBody = song.body.toLowerCase().contains(f);
                         return ListTile(
                           leading: CircleAvatar(
                             backgroundColor: AppColors.primary.withValues(alpha: 0.15),
                             foregroundColor: AppColors.primary,
                             child: Text(notateChord(song.key, american: widget.store.americanNotation), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                           ),
-                          title: Text(song.title),
+                          title: Row(children: [
+                            Expanded(child: Text(song.title)),
+                            if (f.isNotEmpty && !inTitle && (inAuthor || inBody))
+                              Padding(
+                                padding: const EdgeInsets.only(left: 6),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.accent.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    inAuthor && inBody ? 'autor + letra' : inAuthor ? 'autor' : 'letra',
+                                    style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppColors.accent),
+                                  ),
+                                ),
+                              ),
+                          ]),
                           isThreeLine: song.style != null || duration.isNotEmpty,
                           subtitle: Text(
                             [
