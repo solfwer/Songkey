@@ -127,13 +127,13 @@ class _SongScreenState extends State<SongScreen> {
             american: config.americanNotation,
             onSelected: (k) => setState(() => config.setShift(displayed.id, semitoneShift(displayed.key, k))),
           ),
-          // Botón de pausa del desplazamiento automático (solo visible si está activo).
+          // Botón pausa/reanudar del desplazamiento automático (solo visible si está habilitado en opciones).
           if (config.autoScroll)
             IconButton(
-              icon: const Icon(Icons.pause_circle_filled),
-              tooltip: 'Pausar desplazamiento',
-              color: AppColors.accent,
-              onPressed: () => setState(() => config.autoScroll = false),
+              icon: Icon(config.autoScrollPaused ? Icons.play_circle_filled : Icons.pause_circle_filled),
+              tooltip: config.autoScrollPaused ? 'Reanudar desplazamiento' : 'Pausar desplazamiento',
+              color: config.autoScrollPaused ? null : AppColors.accent,
+              onPressed: () => setState(() => config.toggleAutoScrollPause()),
             ),
           // Metrónomo.
           MetronomeButton(controller: _metro),
@@ -305,8 +305,14 @@ class _SongPageState extends State<_SongPage> {
                     american: widget.config.americanNotation,
                     controller: _scrollController,
                     sectionKeys: _sectionKeys,
-                    autoScroll: widget.config.autoScroll,
+                    autoScroll: widget.config.isAutoScrolling,
                     autoScrollSpeed: widget.config.autoScrollSpeed,
+                    onFinished: widget.config.isAutoScrolling
+                        ? () {
+                            // Al llegar al final, pausamos y el botón pasa a ▶.
+                            setState(() => widget.config.autoScrollPaused = true);
+                          }
+                        : null,
                   ),
       ),
     ]);

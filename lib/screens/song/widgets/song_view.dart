@@ -304,6 +304,10 @@ class SongBodyList extends StatefulWidget {
 
   /// Velocidad de auto-scroll en px/s.
   final double autoScrollSpeed;
+
+  /// Se llama cuando el scroll llega al final (si [autoScroll] es true).
+  final VoidCallback? onFinished;
+
   const SongBodyList(
       {super.key,
       required this.sections,
@@ -314,7 +318,8 @@ class SongBodyList extends StatefulWidget {
       this.controller,
       this.sectionKeys,
       this.autoScroll = false,
-      this.autoScrollSpeed = 25.0});
+      this.autoScrollSpeed = 25.0,
+      this.onFinished});
 
   @override
   State<SongBodyList> createState() => _SongBodyListState();
@@ -353,7 +358,7 @@ class _SongBodyListState extends State<SongBodyList> {
     if (!widget.autoScroll) return;
     final controller = widget.controller;
     if (controller == null || !controller.hasClients) return;
-    // Paso pequeo y frecuente => movimiento suave y velocidad constante.
+    // Paso pequeño y frecuente => movimiento suave y velocidad constante.
     const stepMs = 50;
     _timer = Timer.periodic(const Duration(milliseconds: stepMs), (_) {
       if (!controller.hasClients) return;
@@ -363,6 +368,10 @@ class _SongBodyListState extends State<SongBodyList> {
         controller.jumpTo(max);
         _timer?.cancel();
         _timer = null;
+        // Avisar de que hemos llegado al final.
+        if (widget.onFinished != null) {
+          widget.onFinished!();
+        }
       } else {
         controller.jumpTo(next);
       }

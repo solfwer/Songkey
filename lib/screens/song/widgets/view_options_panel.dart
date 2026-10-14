@@ -21,7 +21,12 @@ class SongViewConfig {
   bool americanNotation;
 
   /// Auto-desplazamiento (auto-scroll) para lectura manos libres.
+  /// True = habilitado en Opciones de vista. False = deshabilitado.
   bool autoScroll = false;
+
+  /// True = el scroll está pausado por el usuario (botón del AppBar).
+  /// Solo tiene sentido si [autoScroll] es true.
+  bool autoScrollPaused = false;
 
   /// Velocidad de auto-scroll en px/s (10-100, por defecto 25).
   double autoScrollSpeed = 25.0;
@@ -37,6 +42,24 @@ class SongViewConfig {
   int shiftFor(String songId) => _shiftBySong[songId] ?? 0;
 
   void setShift(String songId, int semitones) => _shiftBySong[songId] = semitones;
+
+  /// Activa el desplazamiento automático (desde Opciones de vista).
+  void enableAutoScroll() {
+    autoScroll = true;
+    autoScrollPaused = false;
+  }
+
+  /// Desactiva el desplazamiento automático (desde Opciones de vista).
+  void disableAutoScroll() {
+    autoScroll = false;
+    autoScrollPaused = false;
+  }
+
+  /// Alterna la pausa del auto-scroll (desde el botón del AppBar).
+  void toggleAutoScrollPause() => autoScrollPaused = !autoScrollPaused;
+
+  /// Indica si el scroll está realmente moviéndose ahora.
+  bool get isAutoScrolling => autoScroll && !autoScrollPaused;
 }
 
 class ViewOptionsPanel extends StatelessWidget {
@@ -194,10 +217,16 @@ class ViewOptionsPanel extends StatelessWidget {
             SwitchListTile(
               secondary: const Icon(Icons.play_circle_outline, color: AppColors.accent),
               title: const Text('Desplazamiento automático'),
-              subtitle: const Text('Desplaza la letra automáticamente para lectura manos libres'),
+              subtitle: Text(config.autoScroll
+                  ? (config.autoScrollPaused ? 'Pausado — toca el botón ▶ en la barra superior' : 'Activo — toca el botón ⏸ en la barra superior para pausar')
+                  : 'Desplaza la letra automáticamente para lectura manos libres'),
               value: config.autoScroll,
               onChanged: (v) {
-                config.autoScroll = v;
+                if (v) {
+                  config.enableAutoScroll();
+                } else {
+                  config.disableAutoScroll();
+                }
                 onChanged();
               },
             ),
