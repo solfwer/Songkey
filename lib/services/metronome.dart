@@ -106,16 +106,16 @@ Uint8List _clickWav(ClickSound tipo, {required int milliseconds, required double
   final data = ByteData(44 + total * 2);
   final rng = Random(1234);
 
-  void tag(String s) {
+  void tag(String s, int offset) {
     for (var i = 0; i < s.length; i++) {
-      data.setUint8(i, s.codeUnitAt(i));
+      data.setUint8(offset + i, s.codeUnitAt(i));
     }
   }
 
-  tag('RIFF');
+  tag('RIFF', 0);
   data.setUint32(4, 36 + total * 2, Endian.little);
-  tag('WAVE');
-  tag('fmt ');
+  tag('WAVE', 8);
+  tag('fmt ', 12);
   data.setUint32(16, 16, Endian.little); // tamaño del bloque fmt
   data.setUint16(20, 1, Endian.little); // PCM
   data.setUint16(22, 1, Endian.little); // mono
@@ -123,7 +123,7 @@ Uint8List _clickWav(ClickSound tipo, {required int milliseconds, required double
   data.setUint32(28, sampleRate * 2, Endian.little); // byte rate
   data.setUint16(32, 2, Endian.little); // block align
   data.setUint16(34, 16, Endian.little); // bits por muestra
-  tag('data');
+  tag('data', 36);
   data.setUint32(40, total * 2, Endian.little);
 
   for (var i = 0; i < total; i++) {
@@ -266,9 +266,11 @@ class Metronome {
         _player!.play(BytesSource(bytes), volume: acento ? 1.0 : 0.75);
       }
     }
-    if (settings.vibration) {
-      // heavyClick se nota mucho ms que selectionClick.
-      HapticFeedback.vibrate();
+    if (settings.vibration && enPulso) {
+      // Vibrar solo en el pulso (no en cada subdivisin) para que no vibre
+      // como un mosquito con corcheas/semicorcheas.
+      // heavyImpact se nota ms que vibrate() (deprecated) en Android 12+.
+      HapticFeedback.heavyImpact();
     }
     onBeat?.call(beat, acento);
     _click++;

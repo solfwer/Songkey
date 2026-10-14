@@ -154,88 +154,23 @@ class MetronomeController extends ChangeNotifier {
   }
 }
 
-/// Botón del AppBar: menú rápido con BPM, compás y play/stop, más el panel.
+/// Botón del AppBar: icono que abre el panel de configuración.
+/// El color cambia cuando está sonando.
 class MetronomeButton extends StatelessWidget {
   final MetronomeController controller;
 
   const MetronomeButton({super.key, required this.controller});
-
-  /// BPM de uso rápido en el menú.
-  static const _bpsRapidos = [60, 70, 80, 90, 100, 110, 120, 140, 160];
-
-  static const _acentoColor = Color(0xFF5AD1E6);
-
-  Widget _marca(bool ok) => ok ? const Icon(Icons.check, size: 18, color: _acentoColor) : const SizedBox.shrink();
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
-        final s = controller.settings;
-        return PopupMenuButton<String>(
+        return IconButton(
           tooltip: controller.activo ? 'Metrónomo sonando' : 'Metrónomo',
           icon: Icon(controller.activo ? Icons.timer : Icons.timer_outlined),
-          color: controller.activo ? _acentoColor : null,
-          itemBuilder: (context) => [
-            PopupMenuItem<String>(
-              value: 'play',
-              child: ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(controller.activo ? Icons.stop : Icons.play_arrow),
-                title: Text(controller.activo ? 'Parar' : 'Iniciar'),
-              ),
-            ),
-            const PopupMenuDivider(),
-            const PopupMenuItem<String>(enabled: false, child: Text('BPM')),
-            for (final bpm in _bpsRapidos)
-              PopupMenuItem<String>(
-                value: 'bpm-$bpm',
-                child: ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.speed, size: 18),
-                  title: Text('$bpm BPM'),
-                  trailing: _marca(s.bpm == bpm),
-                ),
-              ),
-            const PopupMenuDivider(),
-            const PopupMenuItem<String>(enabled: false, child: Text('Comps')),
-            for (final t in timeSignatures)
-              PopupMenuItem<String>(
-                value: 'compas-${t.beats}-${t.unit}',
-                child: ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.music_note, size: 18),
-                  title: Text(t.label),
-                  trailing: _marca(s.beatsPerBar == t.beats && s.beatUnit == t.unit),
-                ),
-              ),
-            const PopupMenuDivider(),
-            const PopupMenuItem<String>(
-              value: 'mas',
-              child: ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.tune, size: 18),
-                title: Text('Ms ajustes...'),
-              ),
-            ),
-          ],
-          onSelected: (v) async {
-            if (v == 'play') {
-              await controller.toggle();
-            } else if (v == 'mas') {
-              _openSheet(context);
-            } else if (v.startsWith('bpm-')) {
-              controller.setBpm(int.parse(v.substring(4)));
-            } else if (v.startsWith('compas-')) {
-              final p = v.split('-');
-              controller.setCompas(int.parse(p[1]), int.parse(p[2]));
-            }
-          },
+          color: controller.activo ? const Color(0xFF5AD1E6) : null,
+          onPressed: () => _openSheet(context),
         );
       },
     );
