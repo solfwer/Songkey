@@ -1,23 +1,23 @@
-// Controles del metrnomo: botn para el AppBar, barra compacta mientras suena
-// y panel de configuracin (BPM, comps, subdivisin, acento, sonido, vibracin).
+// Controles del metrónomo: botón para el AppBar, barra compacta mientras suena
+// y panel de configuración (BPM, compás, subdivisión, acento, sonido).
 import 'package:flutter/material.dart';
 
 import '../../../data/store.dart';
 import '../../../models/song.dart';
 import '../../../services/metronome.dart';
 
-/// Estado compartido del metrnomo dentro de la pantalla de cancin.
+/// Estado compartido del metrónomo dentro de la pantalla de canción.
 class MetronomeController extends ChangeNotifier {
   final Store store;
   late final Metronome metronome;
   MetronomeSettings settings;
   bool activo = false;
 
-  /// Beat actual dentro del comps (para el indicador visual).
+  /// Beat actual dentro del compás (para el indicador visual).
   int beat = 0;
   bool acento = false;
 
-  /// Id de la ltima cancin sincronizada (para no resetear el BPM en cada build).
+  /// Id de la última canción sincronizada (para no resetear el BPM en cada build).
   String? _lastSongId;
 
   MetronomeController(this.store, {Metronome? metro})
@@ -28,12 +28,11 @@ class MetronomeController extends ChangeNotifier {
           subdivision: Subdivision.values[store.metroSub.clamp(0, Subdivision.values.length - 1)],
           accent: store.metroAccent,
           sound: store.metroSound,
-          vibration: store.metroVib,
           clickSound: ClickSound.values[store.metroClick.clamp(0, ClickSound.values.length - 1)],
         ) {
     metronome = metro ?? Metronome(settings: settings);
     // Preparamos el sonido al crear el controlador; si el usuario le da play
-    // antes de que est listo, toggle() espera a que termine.
+    // antes de que esté listo, toggle() espera a que termine.
     metronome.preparar().catchError((_) => false);
     metronome.onBeat = (b, a) {
       beat = b;
@@ -45,8 +44,8 @@ class MetronomeController extends ChangeNotifier {
   /// true mientras se preparan los archivos de sonido.
   bool get preparando => metronome.preparando;
 
-  /// Ajusta el BPM al de la cancin, pero solo al cambiar de cancin y solo si
-  /// la cancin tiene BPM definido (si no, se respeta el ltimo usado).
+  /// Ajusta el BPM al de la canción, pero solo al cambiar de canción y solo si
+  /// la canción tiene BPM definido (si no, se respeta el último usado).
   void syncWithSong(Song song) {
     if (_lastSongId == song.id) return;
     _lastSongId = song.id;
@@ -110,13 +109,7 @@ class MetronomeController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setVibration(bool v) {
-    settings.vibration = v;
-    store.setMetroVibration(v);
-    notifyListeners();
-  }
-
-  /// Arranca o para. Si el sonido an se est preparando, espera.
+  /// Arranca o para. Si el sonido aún se está preparando, espera.
   Future<void> toggle() async {
     if (activo) {
       metronome.stop();
@@ -127,7 +120,7 @@ class MetronomeController extends ChangeNotifier {
     if (settings.sound && !metronome.activo) {
       final listo = await metronome.preparar();
       if (!listo) {
-        // El sonido no est disponible: avisamos pero seguimos (vibra).
+        // El sonido no está disponible: avisamos pero seguimos.
         onSonidoNoDisponible?.call();
       }
     }
@@ -186,14 +179,14 @@ class MetronomeButton extends StatelessWidget {
   }
 }
 
-/// Barra compacta que se muestra mientras el metrnomo suena.
+/// Barra compacta que se muestra mientras el metrónomo suena.
 /// Círculos de los tiempos del compás: el actual se ilumina, el del acento es
-/// ms grande y de otro color. Sirve para guiarse de un vistazo.
+/// más grande y de otro color. Sirve para guiarse de un vistazo.
 class BeatDots extends StatelessWidget {
-  /// Cuntos tiempos tiene el compás (4 en 4/4, 3 en 3/4...).
+  /// Cuántos tiempos tiene el compás (4 en 4/4, 3 en 3/4...).
   final int beats;
 
-  /// Tiempo que est sonando ahora (0 = primero).
+  /// Tiempo que está sonando ahora (0 = primero).
   final int actual;
 
   /// true si el click actual es el del acento.
@@ -257,18 +250,18 @@ class MetronomeBar extends StatelessWidget {
               IconButton(
                 visualDensity: VisualDensity.compact,
                 icon: const Icon(Icons.remove, size: 18),
-                tooltip: 'Ms lento',
+                tooltip: 'Más lento',
                 onPressed: () => controller.setBpm(s.bpm - 1),
               ),
               Text('${s.bpm}', style: const TextStyle(fontWeight: FontWeight.bold)),
               IconButton(
                 visualDensity: VisualDensity.compact,
                 icon: const Icon(Icons.add, size: 18),
-                tooltip: 'Ms rpido',
+                tooltip: 'Más rápido',
                 onPressed: () => controller.setBpm(s.bpm + 1),
               ),
               const SizedBox(width: 4),
-              // Comps
+              // Compás
               DropdownButton<int>(
                 value: s.beatsPerBar,
                 isDense: true,
@@ -286,7 +279,7 @@ class MetronomeBar extends StatelessWidget {
                 },
               ),
               const SizedBox(width: 4),
-              // Subdivisin
+              // Subdivisión
               DropdownButton<Subdivision>(
                 value: s.subdivision,
                 isDense: true,
@@ -310,12 +303,6 @@ class MetronomeBar extends StatelessWidget {
                 icon: Icon(s.sound ? Icons.volume_up : Icons.volume_off, size: 18, color: s.sound ? null : Colors.grey),
                 onPressed: () => controller.setSound(!s.sound),
               ),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                tooltip: s.vibration ? 'Quitar vibracin' : 'Activar vibracin',
-                icon: Icon(s.vibration ? Icons.vibration : Icons.notifications_off, size: 18, color: s.vibration ? null : Colors.grey),
-                onPressed: () => controller.setVibration(!s.vibration),
-              ),
               const SizedBox(width: 4),
               TextButton.icon(
                 onPressed: controller.stop,
@@ -330,7 +317,7 @@ class MetronomeBar extends StatelessWidget {
   }
 }
 
-/// Panel de configuracin del metrnomo.
+/// Panel de configuración del metrónomo.
 class MetronomeSheet extends StatelessWidget {
   final MetronomeController controller;
   const MetronomeSheet({super.key, required this.controller});
@@ -378,11 +365,11 @@ class MetronomeSheet extends StatelessWidget {
                 onChanged: (v) => controller.setBpm(v.round()),
               ),
               const Divider(),
-              // Comps
+              // Compás
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.music_note),
-                title: const Text('Comps'),
+                title: const Text('Compás'),
                 trailing: DropdownButton<int>(
                   value: s.beatsPerBar,
                   items: [for (final t in timeSignatures) DropdownMenuItem(value: t.beats, child: Text(t.label))],
@@ -393,11 +380,11 @@ class MetronomeSheet extends StatelessWidget {
                   },
                 ),
               ),
-              // Subdivisin
+              // Subdivisión
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.grid_4x4),
-                title: const Text('Subdivisin'),
+                title: const Text('Subdivisión'),
                 trailing: DropdownButton<Subdivision>(
                   value: s.subdivision,
                   items: [for (final sub in Subdivision.values) DropdownMenuItem(value: sub, child: Text(sub.label))],
@@ -410,8 +397,8 @@ class MetronomeSheet extends StatelessWidget {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 secondary: const Icon(Icons.arrow_upward),
-                title: const Text('Primer tiempo ms fuerte'),
-                subtitle: const Text('Acento en el primer pulso del comps'),
+                title: const Text('Primer tiempo más fuerte'),
+                subtitle: const Text('Acento en el primer pulso del compás'),
                 value: s.accent,
                 onChanged: controller.setAccent,
               ),
@@ -434,12 +421,6 @@ class MetronomeSheet extends StatelessWidget {
                     if (v != null) controller.setClickSound(v);
                   },
                 ),
-              ),
-              SwitchListTile(
-                secondary: const Icon(Icons.vibration),
-                title: const Text('Vibracin'),
-                value: s.vibration,
-                onChanged: controller.setVibration,
               ),
             ]),
           ),

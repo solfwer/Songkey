@@ -68,7 +68,6 @@ void main() {
       expect(s.subdivision, Subdivision.negra);
       expect(s.accent, isTrue);
       expect(s.sound, isTrue);
-      expect(s.vibration, isTrue);
     });
 
     test('copy crea una copia independiente', () {
@@ -137,19 +136,6 @@ void main() {
       c.setSubdivision(Subdivision.tresillo);
       expect(c.settings.subdivision, Subdivision.tresillo);
       expect(store.metroSub, Subdivision.tresillo.index);
-      c.dispose();
-    });
-
-    test('se puede apagar sonido y vibracin por separado', () {
-      final store = Store();
-      final c = _ctrl(store);
-      c.setSound(false);
-      expect(c.settings.sound, isFalse);
-      expect(c.settings.vibration, isTrue);
-      c.setVibration(false);
-      expect(c.settings.vibration, isFalse);
-      expect(store.metroSound, isFalse);
-      expect(store.metroVib, isFalse);
       c.dispose();
     });
 

@@ -1,4 +1,4 @@
-// Metrónomo: sonido, vibración e indicador visual del beat.
+// Metrónomo: sonido e indicador visual del beat.
 //
 // Los clicks se generan como WAV en memoria y se reproducen con SoundPool
 // nativo en Android (un solo `play()` por click, latencia ~5 ms).
@@ -72,9 +72,6 @@ class MetronomeSettings {
   /// Sonido activado.
   bool sound;
 
-  /// Vibración activada.
-  bool vibration;
-
   /// Tipo de sonido elegido.
   ClickSound clickSound;
   MetronomeSettings({
@@ -84,7 +81,6 @@ class MetronomeSettings {
     this.subdivision = Subdivision.negra,
     this.accent = true,
     this.sound = true,
-    this.vibration = true,
     this.clickSound = ClickSound.click,
   });
 
@@ -95,7 +91,6 @@ class MetronomeSettings {
         subdivision: subdivision,
         accent: accent,
         sound: sound,
-        vibration: vibration,
         clickSound: clickSound,
       );
 }
@@ -327,12 +322,6 @@ class Metronome {
       } else {
         _playFallback(acento);
       }
-    }
-    if (settings.vibration && enPulso) {
-      // Vibrar solo en el pulso (no en cada subdivisión) para que no vibre
-      // como un mosquito con corcheas/semicorcheas.
-      // heavyImpact se nota más que vibrate() (deprecated) en Android 12+.
-      HapticFeedback.heavyImpact();
     }
     onBeat?.call(beat, acento);
     _click++;

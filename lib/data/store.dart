@@ -26,10 +26,10 @@ class Store extends ChangeNotifier {
   /// Modo del editor de contenido: true = visual, false = ChordPro.
   bool editorVisualMode = true;
 
-  /// Vista compacta: secciones nicas una sola vez (sin repeticiones).
+  /// Vista compacta: secciones únicas una sola vez (sin repeticiones).
   bool compactView = false;
 
-  // --- Metrnomo ---
+  // --- Metrónomo ---
   int metroBpm = 120;
   int metroBeats = 4;
   int metroBeatUnit = 4;
@@ -37,7 +37,6 @@ class Store extends ChangeNotifier {
   int metroClick = 0;
   bool metroAccent = true;
   bool metroSound = true;
-  bool metroVib = true;
 
   bool get hasAccount => username.isNotEmpty && _password.isNotEmpty;
 
@@ -67,7 +66,6 @@ class Store extends ChangeNotifier {
     metroClick = prefs.getInt('songkey-metro-click') ?? 0;
     metroAccent = prefs.getBool('songkey-metro-accent') ?? true;
     metroSound = prefs.getBool('songkey-metro-sound') ?? true;
-    metroVib = prefs.getBool('songkey-metro-vib') ?? true;
     notifyListeners();
   }
 
@@ -129,21 +127,21 @@ class Store extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Recuerda el ltimo modo del editor de contenido (visual o ChordPro).
+  /// Recuerda el último modo del editor de contenido (visual o ChordPro).
   void setEditorVisualMode(bool visual) {
     editorVisualMode = visual;
     SharedPreferences.getInstance().then((p) => p.setBool('songkey-editorvisual', visual));
     notifyListeners();
   }
 
-  /// Vista compacta: secciones nicas, sin repetir el contenido.
+  /// Vista compacta: secciones únicas, sin repetir el contenido.
   void setCompactView(bool v) {
     compactView = v;
     SharedPreferences.getInstance().then((p) => p.setBool('songkey-compact', v));
     notifyListeners();
   }
 
-  // --- Metrnomo ---
+  // --- Metrónomo ---
   void setMetroBpm(int v) {
     metroBpm = v;
     SharedPreferences.getInstance().then((p) => p.setInt('songkey-metro-bpm', v));
@@ -182,12 +180,6 @@ class Store extends ChangeNotifier {
   void setMetroSound(bool v) {
     metroSound = v;
     SharedPreferences.getInstance().then((p) => p.setBool('songkey-metro-sound', v));
-    notifyListeners();
-  }
-
-  void setMetroVibration(bool v) {
-    metroVib = v;
-    SharedPreferences.getInstance().then((p) => p.setBool('songkey-metro-vib', v));
     notifyListeners();
   }
 
