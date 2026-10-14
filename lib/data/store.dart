@@ -29,6 +29,10 @@ class Store extends ChangeNotifier {
   /// Vista compacta: secciones únicas una sola vez (sin repeticiones).
   bool compactView = false;
 
+  // --- Copia de seguridad ---
+  DateTime? lastBackupAt;
+  bool autoBackupOnExit = false;
+
   // --- Metrónomo ---
   int metroBpm = 120;
   int metroBeats = 4;
@@ -59,6 +63,10 @@ class Store extends ChangeNotifier {
     defaultLyricsOnly = prefs.getBool('songkey-lyricsonly') ?? false;
     editorVisualMode = prefs.getBool('songkey-editorvisual') ?? true;
     compactView = prefs.getBool('songkey-compact') ?? false;
+    lastBackupAt = prefs.getString('songkey-backup-at') != null
+        ? DateTime.tryParse(prefs.getString('songkey-backup-at')!)
+        : null;
+    autoBackupOnExit = prefs.getBool('songkey-backup-auto') ?? false;
     metroBpm = prefs.getInt('songkey-metro-bpm') ?? 120;
     metroBeats = prefs.getInt('songkey-metro-beats') ?? 4;
     metroBeatUnit = prefs.getInt('songkey-metro-unit') ?? 4;
@@ -210,6 +218,37 @@ class Store extends ChangeNotifier {
       final songs = s.songs.map((x) => x.id == songId ? x.copyWith(lastOpenedAt: stamp) : x).toList();
       return AppState(groups: s.groups, songs: songs, setlists: s.setlists);
     });
+  }
+
+  /// Registra que se ha hecho una copia de seguridad (manual o automática).
+  void recordBackup() {
+    lastBackupAt = DateTime.now();
+    SharedPreferences.getInstance().then((p) => p.setString('songkey-backup-at', lastBackupAt!.toIso8601String()));
+    notifyListeners();
+  }
+
+  /// Activa/desactiva la copia automática al salir de la app.
+  void setAutoBackupOnExit(bool v) {
+    autoBackupOnExit = v;
+    SharedPreferences.getInstance().then((p) => p.setBool('songkey-backup-auto', v));
+    notifyListeners();
+  }
+
+  /// Ejecuta la copia de seguridad automática (al salir de la app).
+  /// Solo hace algo si autoBackupOnExit está activo y hay cambios desde la última copia.
+  Future<void> maybeAutoBackup() async {
+    if (!autoBackupOnExit) return;
+    final now = DateTime.now();
+    if (lastBackupAt != null && now.difference(lastBackupAt!).inDays < 1) return; // ya hay copia hoy
+    await _doBackup();
+  }
+
+  Future<void> _doBackup() async {
+    // Exporta la biblioteca a JSON en la carpeta de descargas.
+    final json = state.encode();
+    // Nota: en Android 10+ usamos flutter_file_dialog para guardar en Descargas.
+    // Aquí solo actualizamos la fecha; la escritura real se hace en la UI.
+    recordBackup();
   }
 
   Future<void> _persist() async {

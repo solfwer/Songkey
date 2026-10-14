@@ -44,6 +44,15 @@ class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
   @override
+  void initState() {
+    super.initState();
+    // Escucha cambios de ciclo de vida para la copia automática al salir.
+    AppLifecycleListener(
+      onPause: () async => widget.store.maybeAutoBackup(),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     final pages = [
       HomeScreen(store: widget.store),
