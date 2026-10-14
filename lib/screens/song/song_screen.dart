@@ -127,13 +127,14 @@ class _SongScreenState extends State<SongScreen> {
             american: config.americanNotation,
             onSelected: (k) => setState(() => config.setShift(displayed.id, semitoneShift(displayed.key, k))),
           ),
-          // Botón de play/pausa del desplazamiento automático.
-          IconButton(
-            icon: Icon(config.autoScroll ? Icons.pause_circle_filled : Icons.play_circle_filled),
-            tooltip: config.autoScroll ? 'Pausar desplazamiento' : 'Desplazar solo',
-            color: config.autoScroll ? AppColors.accent : null,
-            onPressed: () => setState(() => config.autoScroll = !config.autoScroll),
-          ),
+          // Botón de pausa del desplazamiento automático (solo visible si está activo).
+          if (config.autoScroll)
+            IconButton(
+              icon: const Icon(Icons.pause_circle_filled),
+              tooltip: 'Pausar desplazamiento',
+              color: AppColors.accent,
+              onPressed: () => setState(() => config.autoScroll = false),
+            ),
           // Metrónomo.
           MetronomeButton(controller: _metro),
           IconButton(icon: const Icon(Icons.tune), tooltip: 'Opciones de vista', onPressed: () => _scaffoldKey.currentState?.openEndDrawer()),

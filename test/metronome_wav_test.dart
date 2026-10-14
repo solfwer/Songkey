@@ -1,6 +1,7 @@
 // Test de regresión del WAV generado por el metrónomo.
-// Verifica que la cabecera es válida (RIFF/WAVE/fmt /data) y que las
-// muestras no son todas ceros (silencio).
+// Verifica que la cabecera es válida (RIFF/WAVE/fmt /data), que las
+// muestras no son todas ceros (silencio), y que la envolvente elimina
+// los "pops" digitales (primera y última muestra ≈ 0).
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -11,7 +12,7 @@ void main() {
   group('Generación WAV del metrónomo', () {
     for (final tipo in ClickSound.values) {
       test('WAV $tipo: cabecera correcta y muestras no nulas', () {
-        final wav = _clickWavTest(tipo, milliseconds: 60, volume: 0.55);
+        final wav = _clickWavTest(tipo, milliseconds: 60, volume: 0.7);
 
         // 1) Cabecera RIFF
         expect(_readString(wav, 0, 4), equals('RIFF'));
@@ -54,9 +55,9 @@ void main() {
         final expectedSamples = (44100 * 60 / 1000).round();
         expect(samples.length, inInclusiveRange(expectedSamples - 100, expectedSamples + 100));
 
-        // 8) El acento dura más que el normal (solo si el tipo tiene acento)
-        final wavNormal = _clickWavTest(tipo, milliseconds: 40, volume: 0.55);
-        final wavAcento = _clickWavTest(tipo, milliseconds: 60, volume: 0.95);
+        // 8) El acento dura más que el normal
+        final wavNormal = _clickWavTest(tipo, milliseconds: 40, volume: 0.7);
+        final wavAcento = _clickWavTest(tipo, milliseconds: 60, volume: 1.0);
         final normalSize = _readUint32LE(wavNormal, 40);
         final acentoSize = _readUint32LE(wavAcento, 40);
         expect(acentoSize, greaterThan(normalSize),
@@ -67,7 +68,7 @@ void main() {
     test('Cada tipo de sonido genera formas de onda distintas', () {
       final waves = <ClickSound, Uint8List>{};
       for (final tipo in ClickSound.values) {
-        waves[tipo] = _clickWavTest(tipo, milliseconds: 60, volume: 0.55);
+        waves[tipo] = _clickWavTest(tipo, milliseconds: 60, volume: 0.7);
       }
       // Comparar solo la parte de datos (sin cabecera)
       final dataParts = <ClickSound, List<int>>{};
@@ -90,10 +91,43 @@ void main() {
         }
       }
     });
+
+    group('Envolvente (fade-in / fade-out)', () {
+      for (final tipo in ClickSound.values) {
+        test('$tipo: primera y última muestra ≈ 0 (sin pops)', () {
+          final wav = _clickWavTest(tipo, milliseconds: 60, volume: 1.0);
+          final dataSize = _readUint32LE(wav, 40);
+          final firstSample = _readInt16LE(wav, 44);
+          final lastSample = _readInt16LE(wav, 44 + (dataSize - 2));
+          // Con la envolvente, la primera muestra (fade-in) y la última (fade-out) deben ser ~0
+          expect(firstSample.abs(), lessThan(100),
+              reason: 'Fade-in: primera muestra debe ser casi 0, es $firstSample');
+          expect(lastSample.abs(), lessThan(100),
+              reason: 'Fade-out: última muestra debe ser casi 0, es $lastSample');
+        });
+
+        test('$tipo: pico en la envolvente (amplitud significativa)', () {
+          final wav = _clickWavTest(tipo, milliseconds: 60, volume: 1.0);
+          final dataSize = _readUint32LE(wav, 40);
+          final sampleCount = dataSize ~/ 2;
+          // Buscar el máximo absoluto en la zona central (excluyendo fade-in/out)
+          final start = 100.clamp(0, sampleCount);
+          final end = (sampleCount - 100).clamp(0, sampleCount);
+          var maxAbs = 0;
+          for (var i = start; i < end; i++) {
+            final s = _readInt16LE(wav, 44 + i * 2).abs();
+            if (s > maxAbs) maxAbs = s;
+          }
+          expect(maxAbs, greaterThan(2000),
+              reason: 'Debe haber señal significativa en la envolvente (max=$maxAbs)');
+        });
+      }
+    });
   });
 }
 
 /// Copia interna de _clickWav para testear (no es pública).
+/// Debe coincidir exactamente con la implementación en metronome.dart.
 Uint8List _clickWavTest(ClickSound tipo, {required int milliseconds, required double volume}) {
   const sampleRate = 44100;
   final total = (sampleRate * milliseconds / 1000).round();
@@ -120,20 +154,41 @@ Uint8List _clickWavTest(ClickSound tipo, {required int milliseconds, required do
   tag('data', 36);
   data.setUint32(40, total * 2, Endian.little);
 
+  // Parámetros de envolvente (idénticos a metronome.dart)
+  const fadeInSamples = 44; // ~1 ms a 44.1 kHz
+  final fadeOutStart = (total * 0.85).round(); // último 15 %
+
   for (var i = 0; i < total; i++) {
     final t = i / sampleRate;
+
+    // Envolvente: fade-in lineal 1 ms, sostenido, fade-out lineal último 15 %
+    double env;
+    if (i < fadeInSamples) {
+      env = i / fadeInSamples;
+    } else if (i >= fadeOutStart) {
+      env = (total - i) / (total - fadeOutStart);
+    } else {
+      env = 1.0;
+    }
+
     var value = 0.0;
     switch (tipo) {
       case ClickSound.click:
-        value = (rng.nextDouble() * 2 - 1) * exp(-t * 90);
+        final noise = (rng.nextDouble() * 2 - 1);
+        value = noise * exp(-t * 120);
+        value += sin(2 * pi * 3500 * t) * exp(-t * 200) * 0.3;
       case ClickSound.bip:
         value = sin(2 * pi * 1100 * t) * exp(-t * 45);
       case ClickSound.caja:
-        value = (rng.nextDouble() * 2 - 1) * exp(-t * 40) + sin(2 * pi * 180 * t) * exp(-t * 30);
+        final noise = (rng.nextDouble() * 2 - 1) * exp(-t * 50);
+        final tone = sin(2 * pi * 180 * t) * exp(-t * 35);
+        final snap = sin(2 * pi * 2500 * t) * exp(-t * 150) * 0.2;
+        value = noise + tone + snap;
       case ClickSound.campana:
         value = sin(2 * pi * 850 * t) * exp(-t * 9);
+        value += sin(2 * pi * 1275 * t) * exp(-t * 12) * 0.6;
     }
-    final sample = (value * volume * 32767).clamp(-32768, 32767).round();
+    final sample = (value * volume * 32767 * env).clamp(-32768, 32767).round();
     data.setInt16(44 + i * 2, sample, Endian.little);
   }
   return data.buffer.asUint8List();

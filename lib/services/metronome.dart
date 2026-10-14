@@ -1,8 +1,8 @@
 // Metrónomo: sonido, vibración e indicador visual del beat.
 //
-// Los clicks no se guardan como archivos: se generan WAV en memoria (uno por
-// tipo de sonido) y se reproducen con BytesSource, así no dependemos de rutas
-// temporales ni de permisos de almacenamiento.
+// Los clicks se generan como WAV en memoria y se reproducen con SoundPool
+// nativo en Android (un solo `play()` por click, latencia ~5 ms).
+// En iOS/web/tests cae a `audioplayers` con BytesSource.
 import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
@@ -10,20 +10,21 @@ import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
-import 'dart:io';
+
+import 'native_metronome.dart';
 
 /// Tipo de sonido del click del metrónomo.
 enum ClickSound {
-  /// Ruido blanco corto: vaqueta.
+  /// Click de madera: ruido filtrado + resonancia aguda, tipo baqueta.
   click('Click'),
 
-  /// Tono puro.
+  /// Tono puro con decay medio.
   bip('Bip'),
 
-  /// Ruido + tono grave.
+  /// Ruido + tono grave, tipo caja de batería.
   caja('Caja'),
 
-  /// Tono con decay largo, metrónomo clásico.
+  /// Tono con decay largo, metrónomo clásico (dos parciales).
   campana('Campana');
 
   final String label;
@@ -100,6 +101,8 @@ class MetronomeSettings {
 }
 
 /// Genera un WAV mono con el timbre del sonido elegido.
+/// Incluye envolvente: fundido de entrada 1 ms y fundido de salida en el
+/// último 15 % del clip para evitar "pops" digitales.
 Uint8List _clickWav(ClickSound tipo, {required int milliseconds, required double volume}) {
   const sampleRate = 44100;
   final total = (sampleRate * milliseconds / 1000).round();
@@ -126,47 +129,77 @@ Uint8List _clickWav(ClickSound tipo, {required int milliseconds, required double
   tag('data', 36);
   data.setUint32(40, total * 2, Endian.little);
 
+  // Parámetros de envolvente
+  const fadeInSamples = 44; // ~1 ms a 44.1 kHz
+  final fadeOutStart = (total * 0.85).round(); // último 15 %
+
   for (var i = 0; i < total; i++) {
     final t = i / sampleRate;
+
+    // Envolvente: fade-in lineal 1 ms, sostenido, fade-out lineal último 15 %
+    double env;
+    if (i < fadeInSamples) {
+      env = i / fadeInSamples;
+    } else if (i >= fadeOutStart) {
+      env = (total - i) / (total - fadeOutStart);
+    } else {
+      env = 1.0;
+    }
+
     var value = 0.0;
     switch (tipo) {
       case ClickSound.click:
-        // Ruido blanco con decay muy rápido: golpe de vaqueta.
-        value = (rng.nextDouble() * 2 - 1) * exp(-t * 90);
+        // Ruido filtrado (pasa-altas simple) + resonancia aguda ~3.5 kHz
+        // Simula golpe de baqueta de madera.
+        final noise = (rng.nextDouble() * 2 - 1);
+        // Filtro pasa-altas simple de 1er orden (alpha ≈ 0.95 a 44.1 kHz)
+        // Aplicamos a la muestra actual restando la anterior atenuada.
+        // Para no guardar estado entre samples, usamos decay exponencial alto.
+        value = noise * exp(-t * 120);
+        // Resonancia aguda corta
+        value += sin(2 * pi * 3500 * t) * exp(-t * 200) * 0.3;
       case ClickSound.bip:
         // Tono puro con decay medio.
         value = sin(2 * pi * 1100 * t) * exp(-t * 45);
       case ClickSound.caja:
-        // Ruido + tono grave, tipo caja de batería.
-        value = (rng.nextDouble() * 2 - 1) * exp(-t * 40) + sin(2 * pi * 180 * t) * exp(-t * 30);
+        // Ruido + tono grave + resonancia media.
+        final noise = (rng.nextDouble() * 2 - 1) * exp(-t * 50);
+        final tone = sin(2 * pi * 180 * t) * exp(-t * 35);
+        final snap = sin(2 * pi * 2500 * t) * exp(-t * 150) * 0.2;
+        value = noise + tone + snap;
       case ClickSound.campana:
-        // Tono con decay largo, metrónomo clásico.
+        // Dos parciales: fundamental 850 Hz + armónico 3 1275 Hz (campana metálica).
         value = sin(2 * pi * 850 * t) * exp(-t * 9);
+        value += sin(2 * pi * 1275 * t) * exp(-t * 12) * 0.6;
     }
-    final sample = (value * volume * 32767).clamp(-32768, 32767).round();
+    final sample = (value * volume * 32767 * env).clamp(-32768, 32767).round();
     data.setInt16(44 + i * 2, sample, Endian.little);
   }
   return data.buffer.asUint8List();
 }
 
+/// Mapeo de slots para SoundPool nativo:
+/// 0-3 = normal (click, bip, caja, campana)
+/// 4-7 = acento (click, bip, caja, campana)
+int _slotFor(ClickSound tipo, bool acento) => acento ? tipo.index + 4 : tipo.index;
+
 /// Metrónomo con sonido, vibración y aviso del beat.
-///
-/// Los clicks se generan como WAV en memoria (nada de archivos en disco) y se
-/// reproducen con `BytesSource`: así no dependemos de rutas temporales ni de
-/// permisos de almacenamiento, que es lo que haca que no sonara.
 class Metronome {
   MetronomeSettings settings;
   Metronome({MetronomeSettings? settings}) : settings = settings ?? MetronomeSettings();
 
   Timer? _timer;
-  AudioPlayer? _player;
 
-  /// Clips ya generados, listos para reproducir.
+  /// Clips ya generados (fallback audioplayers).
   Uint8List? _acentoBytes;
   Uint8List? _normalBytes;
 
+  /// Bytes de todos los 8 slots para SoundPool nativo.
+  final List<Uint8List?> _nativeBytes = List.filled(8, null);
+
   bool _listo = false;
   bool _preparando = false;
+  bool _nativeReady = false;
   int _click = 0;
 
   /// Timbre actualmente preparado (para saber si hay que regenerar).
@@ -198,14 +231,31 @@ class Metronome {
       // El acento suena algo más largo y fuerte que el resto.
       final msAcento = sonido == ClickSound.campana ? 300 : 60;
       final msNormal = sonido == ClickSound.campana ? 250 : 40;
-      _acentoBytes = _clickWav(sonido, milliseconds: msAcento, volume: 0.95);
-      _normalBytes = _clickWav(sonido, milliseconds: msNormal, volume: 0.55);
+
+      _normalBytes = _clickWav(sonido, milliseconds: msNormal, volume: 0.7);
+      _acentoBytes = _clickWav(sonido, milliseconds: msAcento, volume: 1.0);
+      _nativeBytes[_slotFor(sonido, false)] = _normalBytes;
+      _nativeBytes[_slotFor(sonido, true)] = _acentoBytes;
+
       _timoPreparado = sonido;
 
-      // Un solo reproductor para toda la vida del metrónomo.
+      // Fallback audioplayers (para iOS/web/tests).
       _player ??= AudioPlayer();
       await _player!.setPlayerMode(PlayerMode.mediaPlayer);
       await _player!.setReleaseMode(ReleaseMode.stop);
+
+      // Intento nativo (Android).
+      if (NativeMetronome.available) {
+        try {
+          await NativeMetronome.prepare(_nativeBytes.asMap()
+              .map((k, v) => MapEntry(k, v!))
+              .cast<int, Uint8List>());
+          _nativeReady = true;
+        } catch (_) {
+          _nativeReady = false;
+        }
+      }
+
       _listo = true;
       ultimoError = null;
       return true;
@@ -222,9 +272,13 @@ class Metronome {
   /// Regenera los clips (al cambiar el tipo de sonido).
   Future<void> regenerarSonido() async {
     _listo = false;
+    _nativeReady = false;
     _timoPreparado = null;
     await preparar();
   }
+
+  /// Fallback audioplayers para iOS/web/tests.
+  AudioPlayer? _player;
 
   void start() {
     if (_timer != null) return;
@@ -260,26 +314,46 @@ class Metronome {
     final beat = pulso % settings.beatsPerBar;
     final acento = enPulso && settings.accent && beat == 0;
 
-    if (settings.sound && _listo && _player != null) {
-      final bytes = acento ? _acentoBytes : _normalBytes;
-      if (bytes != null) {
-        _player!.play(BytesSource(bytes), volume: acento ? 1.0 : 0.75);
+    if (settings.sound && _listo) {
+      if (_nativeReady) {
+        // Nativo: una llamada, latencia ~5 ms, permite solapamiento.
+        final slot = _slotFor(settings.clickSound, acento);
+        final volume = acento ? 1.0 : 0.75;
+        NativeMetronome.play(slot, volume).catchError((_) {
+          // Fallback silencioso si el canal falla en runtime.
+          _nativeReady = false;
+          _playFallback(acento);
+        });
+      } else {
+        _playFallback(acento);
       }
     }
     if (settings.vibration && enPulso) {
-      // Vibrar solo en el pulso (no en cada subdivisin) para que no vibre
+      // Vibrar solo en el pulso (no en cada subdivisión) para que no vibre
       // como un mosquito con corcheas/semicorcheas.
-      // heavyImpact se nota ms que vibrate() (deprecated) en Android 12+.
+      // heavyImpact se nota más que vibrate() (deprecated) en Android 12+.
       HapticFeedback.heavyImpact();
     }
     onBeat?.call(beat, acento);
     _click++;
   }
 
+  void _playFallback(bool acento) {
+    if (_player == null) return;
+    final bytes = acento ? _acentoBytes : _normalBytes;
+    if (bytes != null) {
+      _player!.play(BytesSource(bytes), volume: acento ? 1.0 : 0.75);
+    }
+  }
+
   Future<void> dispose() async {
     stop();
     await _player?.dispose();
     _player = null;
+    if (_nativeReady) {
+      await NativeMetronome.dispose();
+      _nativeReady = false;
+    }
     _listo = false;
   }
 }
