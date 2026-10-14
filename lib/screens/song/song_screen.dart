@@ -136,7 +136,7 @@ class _SongScreenState extends State<SongScreen> {
               onPressed: () => setState(() => config.toggleAutoScrollPause()),
             ),
           // Metrónomo.
-          MetronomeButton(controller: _metro),
+          MetronomeButton(controller: _metro, song: displayed),
           IconButton(icon: const Icon(Icons.tune), tooltip: 'Opciones de vista', onPressed: () => _scaffoldKey.currentState?.openEndDrawer()),
         ],
       ),

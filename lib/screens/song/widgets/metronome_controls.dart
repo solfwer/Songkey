@@ -140,6 +140,37 @@ class MetronomeController extends ChangeNotifier {
     }
   }
 
+  /// Guarda el BPM actual en la canción (si es distinta a la que tiene).
+  void saveBpmToSong(Song song) {
+    if (song.bpm != settings.bpm) {
+      store.updateSongBpm(song.id, settings.bpm);
+    }
+  }
+
+  /// Tap tempo: mide intervalos entre toques y calcula BPM.
+  /// Llamar cada vez que el usuario pulsa el botón TAP.
+  DateTime? _lastTap;
+  final List<int> _intervals = [];
+
+  void onTapTempo() {
+    final now = DateTime.now();
+    if (_lastTap != null) {
+      final diff = now.difference(_lastTap!).inMilliseconds;
+      if (diff < 2000) { // si pasan más de 2 s, reiniciamos
+        _intervals.add(diff);
+        if (_intervals.length > 4) _intervals.removeAt(0);
+        if (_intervals.length >= 2) {
+          final avg = _intervals.reduce((a, b) => a + b) / _intervals.length;
+          final bpm = (60000 / avg).round().clamp(30, 300);
+          setBpm(bpm);
+        }
+      } else {
+        _intervals.clear();
+      }
+    }
+    _lastTap = now;
+  }
+
   @override
   void dispose() {
     metronome.dispose();
@@ -151,8 +182,9 @@ class MetronomeController extends ChangeNotifier {
 /// El color cambia cuando está sonando.
 class MetronomeButton extends StatelessWidget {
   final MetronomeController controller;
+  final Song? song;
 
-  const MetronomeButton({super.key, required this.controller});
+  const MetronomeButton({super.key, required this.controller, this.song});
 
   @override
   Widget build(BuildContext context) {
@@ -174,7 +206,7 @@ class MetronomeButton extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => MetronomeSheet(controller: controller),
+      builder: (_) => MetronomeSheet(controller: controller, song: song),
     );
   }
 }
@@ -320,7 +352,8 @@ class MetronomeBar extends StatelessWidget {
 /// Panel de configuración del metrónomo.
 class MetronomeSheet extends StatelessWidget {
   final MetronomeController controller;
-  const MetronomeSheet({super.key, required this.controller});
+  final Song? song;
+  const MetronomeSheet({super.key, required this.controller, this.song});
 
   @override
   Widget build(BuildContext context) {
@@ -328,6 +361,8 @@ class MetronomeSheet extends StatelessWidget {
       animation: controller,
       builder: (context, _) {
         final s = controller.settings;
+        final songBpm = song?.bpm;
+        final bpmDiffers = songBpm != null && songBpm > 0 && songBpm != s.bpm;
         return Padding(
           padding: EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 16 + MediaQuery.of(context).viewInsets.bottom),
           child: SingleChildScrollView(
@@ -364,6 +399,43 @@ class MetronomeSheet extends StatelessWidget {
                 label: '${s.bpm} BPM',
                 onChanged: (v) => controller.setBpm(v.round()),
               ),
+              // BPM de la canción (si lo tiene)
+              if (songBpm != null && songBpm > 0) ...[
+                const SizedBox(height: 4),
+                Row(children: [
+                  const SizedBox(width: 8),
+                  Text('BPM de la canción: $songBpm', style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                  if (bpmDiffers) ...[
+                    const Spacer(),
+                    TextButton.icon(
+                      icon: const Icon(Icons.save, size: 18),
+                      label: const Text('Guardar BPM en esta canción'),
+                      onPressed: () {
+                        controller.saveBpmToSong(song!);
+                        Navigator.of(context).pop();
+                      },
+                    ),
+                  ],
+                ]),
+              ],
+              // Tap tempo
+              const SizedBox(height: 8),
+              Row(children: [
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  icon: const Icon(Icons.touch_app, size: 28),
+                  label: const Text('TAP', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 2)),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 40),
+                    backgroundColor: const Color(0xFF5AD1E6),
+                    foregroundColor: Colors.black,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: controller.onTapTempo,
+                ),
+                const Spacer(),
+                Text('Pulsa al ritmo', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+              ]),
               const Divider(),
               // Compás
               ListTile(

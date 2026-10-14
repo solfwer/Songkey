@@ -255,4 +255,12 @@ class Store extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_key, state.encode());
   }
+
+  /// Actualiza el BPM de una canción.
+  void updateSongBpm(String songId, int bpm) {
+    update((s) {
+      final songs = s.songs.map((x) => x.id == songId ? x.copyWith(bpm: bpm) : x).toList();
+      return AppState(groups: s.groups, songs: songs, setlists: s.setlists);
+    });
+  }
 }
