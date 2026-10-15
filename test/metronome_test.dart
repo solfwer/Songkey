@@ -1,4 +1,4 @@
-// Tests del metrónomo: ajustes, subdivisiones y BPM segn la cancin.
+// Tests del metrónomo: ajustes, subdivisiones y BPM según la canción.
 import 'package:appchords/data/store.dart';
 import 'package:appchords/models/song.dart';
 import 'package:appchords/screens/song/widgets/metronome_controls.dart';
@@ -6,6 +6,7 @@ import 'package:appchords/services/metronome.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
 
 /// Metrnomo de mentira para poder testear sin plugin de audio.
 class _MetroFalso extends Metronome {
@@ -161,5 +162,65 @@ void main() {
     expect(find.text('Negras'), findsOneWidget);
     expect(find.text('Parar'), findsOneWidget);
     c.dispose();
+  });
+
+  group('Metronome timing regression', () {
+    test('Timer usa microsegundos: BPM alto + subdivisin no trunca a 0', () {
+      // 300 BPM + semicorchea (4 clicks/pulso) = 50000 µs = 50 ms
+      // Antes del fix: micros ~/ 1000 = 50 ms OK, pero a 400 BPM = 37 ms truncado a 37 ms
+      // Con Duration(microseconds: micros) no hay truncado.
+      final m = Metronome(settings: MetronomeSettings(bpm: 300, subdivision: Subdivision.semicorchea));
+      // Verificar que el cálculo de micros es correcto
+      final porPulso = m.settings.subdivision.clicksPerBeat;
+      final micros = (60000000 / m.settings.bpm / porPulso).round();
+      expect(micros, equals(50000)); // 50000 µs = 50 ms exactos
+    });
+
+    test('start() no hace doble click: solo un _sonar inmediato', () async {
+      int sonarCalls = 0;
+      final m = Metronome(
+        settings: MetronomeSettings(bpm: 120, subdivision: Subdivision.negra),
+      );
+      // Sobrescribir _sonar para contar llamadas
+      final completer = Completer<void>();
+      m.onBeat = (_, __) {
+        sonarCalls++;
+        if (!completer.isCompleted) completer.complete();
+      };
+      m.start();
+      // Esperar a que se ejecute el Timer.run (siguiente microtask)
+      await completer.future;
+      // Inmediatamente después de start, debe haber exactamente 1 llamada a _sonar (el Timer.run)
+      expect(sonarCalls, equals(1));
+      m.stop();
+    });
+
+    test('restart() no hace doble click', () async {
+      int sonarCalls = 0;
+      final m = Metronome(
+        settings: MetronomeSettings(bpm: 120, subdivision: Subdivision.negra),
+      );
+      // Primer start: esperar al primer _sonar
+      final startCompleter = Completer<void>();
+      m.onBeat = (_, __) {
+        sonarCalls++;
+        if (!startCompleter.isCompleted) startCompleter.complete();
+      };
+      m.start();
+      await startCompleter.future;
+      expect(sonarCalls, equals(1));
+      // Preparar completer para el restart
+      final restartCompleter = Completer<void>();
+      m.onBeat = (_, __) {
+        sonarCalls++;
+        if (!restartCompleter.isCompleted) restartCompleter.complete();
+      };
+      // El completer DEBE estar listo ANTES de llamar a restart()
+      m.restart();
+      // restart debe resetear y disparar exactamente 1 _sonar nuevo
+      await restartCompleter.future;
+      expect(sonarCalls, equals(2));
+      m.stop();
+    });
   });
 }

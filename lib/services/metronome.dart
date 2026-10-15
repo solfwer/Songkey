@@ -246,8 +246,9 @@ class Metronome {
               .map((k, v) => MapEntry(k, v!))
               .cast<int, Uint8List>());
           _nativeReady = true;
-        } catch (_) {
+        } catch (e) {
           _nativeReady = false;
+          ultimoError = e; // Guardar error para diagnóstico
         }
       }
 
@@ -279,21 +280,23 @@ class Metronome {
     if (_timer != null) return;
     _click = 0;
     _programar();
-    _sonar();
+    // Primer click inmediato sin esperar al timer (evita doble click si el timer dispara rápido).
+    Timer.run(_sonar);
   }
 
   void _programar() {
     _timer?.cancel();
     final porPulso = settings.subdivision.clicksPerBeat;
     final micros = (60000000 / settings.bpm / porPulso).round();
-    _timer = Timer.periodic(Duration(milliseconds: micros ~/ 1000), (_) => _sonar());
+    // Usar microsegundos directamente para precisión en BPM altos + subdivisiones.
+    _timer = Timer.periodic(Duration(microseconds: micros), (_) => _sonar());
   }
 
   void restart() {
     if (_timer == null) return;
     _click = 0;
     _programar();
-    _sonar();
+    Timer.run(_sonar);
   }
 
   void stop() {
