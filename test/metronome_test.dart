@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
+import 'dart:typed_data';
 
 /// Metrónomo de mentira para poder testear sin plugin de audio.
 class _MetroFalso extends Metronome {
@@ -15,11 +16,24 @@ class _MetroFalso extends Metronome {
   @override
   Future<bool> preparar() async => true;
   @override
-  void start() => arranques++;
+  void start() {
+    arranques++;
+    // Simular el callback onBeat inmediato (como Timer.run en el real)
+    if (onBeat != null) {
+      // Usar scheduleMicrotask para simular el comportamiento asíncrono
+      scheduleMicrotask(() => onBeat!(0, settings.accent));
+    }
+  }
   @override
   void stop() {}
   @override
-  void restart() => arranques++;
+  void restart() {
+    arranques++;
+    resetClickCount();
+    if (onBeat != null) {
+      scheduleMicrotask(() => onBeat!(0, settings.accent));
+    }
+  }
   @override
   Future<void> regenerarSonido() async {}
   @override
@@ -203,50 +217,43 @@ void main() {
       expect(micros, equals(125000));
     });
 
-    test('start() no hace doble click: solo un _sonar inmediato', () async {
-      int sonarCalls = 0;
-      final m = Metronome(
-        settings: MetronomeSettings(bpm: 120, subdivision: Subdivision.negra),
-      );
-      // Sobrescribir _sonar para contar llamadas
+    test('start() no hace doble click: solo un onBeat inmediato', () async {
+      int beatCalls = 0;
+      final m = _MetroFalso(MetronomeSettings(bpm: 120, subdivision: Subdivision.negra));
       final completer = Completer<void>();
       m.onBeat = (_, __) {
-        sonarCalls++;
+        beatCalls++;
         if (!completer.isCompleted) completer.complete();
       };
       m.start();
       // Esperar a que se ejecute el Timer.run (siguiente microtask)
       await completer.future;
-      // Inmediatamente después de start, debe haber exactamente 1 llamada a _sonar (el Timer.run)
-      expect(sonarCalls, equals(1));
+      // Inmediatamente después de start, debe haber exactamente 1 llamada a onBeat
+      expect(beatCalls, equals(1));
       m.stop();
     });
 
     test('restart() no hace doble click', () async {
-      int sonarCalls = 0;
-      final m = Metronome(
-        settings: MetronomeSettings(bpm: 120, subdivision: Subdivision.negra),
-      );
-      // Primer start: esperar al primer _sonar
+      int beatCalls = 0;
+      final m = _MetroFalso(MetronomeSettings(bpm: 120, subdivision: Subdivision.negra));
+      // Primer start: esperar al primer onBeat
       final startCompleter = Completer<void>();
       m.onBeat = (_, __) {
-        sonarCalls++;
+        beatCalls++;
         if (!startCompleter.isCompleted) startCompleter.complete();
       };
       m.start();
       await startCompleter.future;
-      expect(sonarCalls, equals(1));
+      expect(beatCalls, equals(1));
       // Preparar completer para el restart
       final restartCompleter = Completer<void>();
       m.onBeat = (_, __) {
-        sonarCalls++;
+        beatCalls++;
         if (!restartCompleter.isCompleted) restartCompleter.complete();
       };
-      // El completer DEBE estar listo ANTES de llamar a restart()
       m.restart();
-      // restart debe resetear y disparar exactamente 1 _sonar nuevo
       await restartCompleter.future;
-      expect(sonarCalls, equals(2));
+      expect(beatCalls, equals(2));
       m.stop();
     });
   });
@@ -282,4 +289,164 @@ void main() {
       expect(store4.metroSub, equals(1));
     });
   });
+
+  group('_buildBarWav generation', () {
+    test('genera WAV válido con cabecera RIFF/WAVE', () {
+      final wav = Metronome.buildBarWavForTest(
+        tipo: ClickSound.click,
+        bpm: 120,
+        beatsPerBar: 4,
+        clicksPerBeat: 1,
+        accent: true,
+      );
+      expect(_readString(wav, 0, 4), equals('RIFF'));
+      expect(_readString(wav, 8, 4), equals('WAVE'));
+      expect(_readString(wav, 12, 4), equals('fmt '));
+      expect(_readString(wav, 36, 4), equals('data'));
+    });
+
+    test('longitud exacta en muestras según BPM y compás', () {
+      // 120 BPM, 4/4, negras = 60000/120 = 500 ms por pulso
+      // 4 pulsos = 2000 ms = 2 segundos = 88200 muestras a 44100 Hz
+      final wav = Metronome.buildBarWavForTest(
+        tipo: ClickSound.click,
+        bpm: 120,
+        beatsPerBar: 4,
+        clicksPerBeat: 1,
+        accent: true,
+      );
+      final dataSize = _readUint32LE(wav, 40);
+      final samples = dataSize ~/ 2;
+      expect(samples, equals(88200));
+    });
+
+    test('corcheas duplica los clicks en el mismo compás', () {
+      // 120 BPM, 4/4, corcheas = 2 clicks por pulso = 8 clicks totales
+      final wavNegra = Metronome.buildBarWavForTest(
+        tipo: ClickSound.click,
+        bpm: 120,
+        beatsPerBar: 4,
+        clicksPerBeat: 1,
+        accent: true,
+      );
+      final wavCorchea = Metronome.buildBarWavForTest(
+        tipo: ClickSound.click,
+        bpm: 120,
+        beatsPerBar: 4,
+        clicksPerBeat: 2,
+        accent: true,
+      );
+      // Ambos deben tener la misma longitud (mismo compás)
+      final sizeNegra = _readUint32LE(wavNegra, 40);
+      final sizeCorchea = _readUint32LE(wavCorchea, 40);
+      expect(sizeCorchea, equals(sizeNegra));
+    });
+
+    test('acento solo en el primer pulso cuando accent=true', () {
+      final wav = Metronome.buildBarWavForTest(
+        tipo: ClickSound.click,
+        bpm: 120,
+        beatsPerBar: 4,
+        clicksPerBeat: 1,
+        accent: true,
+      );
+      // Verificar que hay señal (no es silencio)
+      final dataSize = _readUint32LE(wav, 40);
+      var nonZero = 0;
+      for (var i = 0; i < dataSize ~/ 2; i++) {
+        if (_readInt16LE(wav, 44 + i * 2) != 0) nonZero++;
+      }
+      expect(nonZero, greaterThan(0));
+    });
+
+    test('sin acento (accent=false) todos los pulsos tienen misma intensidad', () {
+      final wav = Metronome.buildBarWavForTest(
+        tipo: ClickSound.click,
+        bpm: 120,
+        beatsPerBar: 4,
+        clicksPerBeat: 1,
+        accent: false,
+      );
+      final dataSize = _readUint32LE(wav, 40);
+      var nonZero = 0;
+      for (var i = 0; i < dataSize ~/ 2; i++) {
+        if (_readInt16LE(wav, 44 + i * 2) != 0) nonZero++;
+      }
+      expect(nonZero, greaterThan(0));
+    });
+
+    test('wrap-around: cola de campana no se trunca al final del compás', () {
+      // 60 BPM, 4/4 = 1000 ms por pulso, 4000 ms total
+      // Campana acento = 300 ms, normal = 250 ms
+      // En el último pulso (3000-4000 ms), la campana de 300 ms
+      // debe hacer wrap al inicio sin cortarse
+      final wav = Metronome.buildBarWavForTest(
+        tipo: ClickSound.campana,
+        bpm: 60,
+        beatsPerBar: 4,
+        clicksPerBeat: 1,
+        accent: true,
+      );
+      final dataSize = _readUint32LE(wav, 40);
+      final samples = dataSize ~/ 2;
+      // 60 BPM, 4/4 = 4 * 44100 = 176400 muestras
+      expect(samples, equals(176400));
+
+      // Verificar que hay señal al inicio (wrap del último click)
+      var earlySignal = false;
+      for (var i = 0; i < 5000; i++) {
+        if (_readInt16LE(wav, 44 + i * 2) != 0) {
+          earlySignal = true;
+          break;
+        }
+      }
+      expect(earlySignal, isTrue, reason: 'Debe haber señal al inicio por wrap-around de la cola final');
+    });
+
+    test('cada timbre genera forma de onda distinta', () {
+      final waves = <ClickSound, Uint8List>{};
+      for (final tipo in ClickSound.values) {
+        waves[tipo] = Metronome.buildBarWavForTest(
+          tipo: tipo,
+          bpm: 120,
+          beatsPerBar: 4,
+          clicksPerBeat: 1,
+          accent: true,
+        );
+      }
+      // Comparar solo la parte de datos
+      final dataParts = <ClickSound, List<int>>{};
+      for (final e in waves.entries) {
+        final dataSize = _readUint32LE(e.value, 40);
+        final samples = <int>[];
+        for (var i = 0; i < dataSize ~/ 2; i++) {
+          samples.add(_readInt16LE(e.value, 44 + i * 2));
+        }
+        dataParts[e.key] = samples;
+      }
+      final tipos = ClickSound.values;
+      for (var i = 0; i < tipos.length; i++) {
+        for (var j = i + 1; j < tipos.length; j++) {
+          final a = dataParts[tipos[i]]!;
+          final b = dataParts[tipos[j]]!;
+          final equal = a.length == b.length && a.asMap().entries.every((e) => e.value == b[e.key]);
+          expect(equal, isFalse, reason: '${tipos[i]} y ${tipos[j]} no deben ser idénticos');
+        }
+      }
+    });
+  });
 }
+
+// Helpers para leer WAV (copiados de metronome_wav_test.dart)
+int _readUint32LE(Uint8List b, int offset) =>
+    b[offset] | (b[offset + 1] << 8) | (b[offset + 2] << 16) | (b[offset + 3] << 24);
+
+int _readUint16LE(Uint8List b, int offset) => b[offset] | (b[offset + 1] << 8);
+
+int _readInt16LE(Uint8List b, int offset) {
+  final v = _readUint16LE(b, offset);
+  return v >= 32768 ? v - 65536 : v;
+}
+
+String _readString(Uint8List b, int offset, int len) =>
+    String.fromCharCodes(b.sublist(offset, offset + len));

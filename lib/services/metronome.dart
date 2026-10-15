@@ -1,17 +1,13 @@
 // Metrónomo: sonido e indicador visual del beat.
-//
-// En Android el loop de tiempo corre en un hilo nativo dedicado (timing absoluto,
-// sin acumular jitter) y Dart solo recibe callbacks onBeat.
-// En iOS/web/tests cae a `audioplayers` con BytesSource (solo negras/corcheas).
+// Usa flutter_soloud con loop de compás en memoria (WAV generado en Dart).
+// En todas las plataformas el timing corre en Dart con programación absoluta
+// (nextTime += intervalo, sin acumular jitter) y onBeat se dispara desde ahí.
 import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:audioplayers/audioplayers.dart';
-import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
-
-import 'native_metronome.dart';
+import 'package:flutter_soloud/flutter_soloud.dart';
+import 'package:meta/meta.dart';
 
 /// Tipo de sonido del click del metrónomo.
 enum ClickSound {
@@ -167,91 +163,189 @@ Uint8List _clickWav(ClickSound tipo, {required int milliseconds, required double
   return data.buffer.asUint8List();
 }
 
-/// Mapeo de slots para SoundPool nativo:
-/// 0-3 = normal (click, bip, caja, campana)
-/// 4-7 = acento (click, bip, caja, campana)
-int _slotFor(ClickSound tipo, bool acento) => acento ? tipo.index + 4 : tipo.index;
+/// Genera un WAV de un compás completo con todos los clicks colocados
+/// en sus posiciones exactas por muestra. Incluye acento en el primer
+/// pulso si [accent] es true. Maneja wrap-around de colas que cruzan
+/// el límite del compás para evitar pops en el loop.
+Uint8List _buildBarWav({
+  required ClickSound tipo,
+  required int bpm,
+  required int beatsPerBar,
+  required int clicksPerBeat,
+  required bool accent,
+}) {
+  const sampleRate = 44100;
 
-/// Metrónomo con sonido y aviso del beat.
+  // Duración de un pulso (negra) en muestras
+  final samplesPerBeat = ((sampleRate * 60) / bpm).round();
+  // Duración total del compás en muestras
+  final totalSamples = samplesPerBeat * beatsPerBar;
+  // Click por subdivisión (negra=1, corchea=2)
+  final samplesPerClick = (samplesPerBeat / clicksPerBeat).round();
+
+  // Generar los dos clicks (normal y acento) con duración suficiente
+  // La campana dura más (300ms acento, 250ms normal), otras ~60/40ms
+  final msAcento = tipo == ClickSound.campana ? 300 : 60;
+  final msNormal = tipo == ClickSound.campana ? 250 : 40;
+
+  final clickNormal = _clickWav(tipo, milliseconds: msNormal, volume: 0.7);
+  final clickAcento = _clickWav(tipo, milliseconds: msAcento, volume: 1.0);
+
+  // Extraer solo las muestras de audio (sin cabecera WAV)
+  Int16List extractSamples(Uint8List wav) {
+    final dataSize = _readUint32LE(wav, 40);
+    final samples = Int16List(dataSize ~/ 2);
+    for (var i = 0; i < samples.length; i++) {
+      samples[i] = _readInt16LE(wav, 44 + i * 2);
+    }
+    return samples;
+  }
+
+  final normalSamples = extractSamples(clickNormal);
+  final acentoSamples = extractSamples(clickAcento);
+
+  // Buffer de salida (mono 16-bit)
+  final output = Int16List(totalSamples);
+
+  // Total de clicks en el compás
+  final totalClicks = beatsPerBar * clicksPerBeat;
+
+  for (var k = 0; k < totalClicks; k++) {
+    // Posición exacta de este click en muestras
+    final pos = (k * samplesPerClick).round();
+    if (pos >= totalSamples) continue;
+
+    // Determinar si este click es el del acento (primer pulso, en tiempo, con acento activado)
+    final enPulso = k % clicksPerBeat == 0;
+    final pulso = k ~/ clicksPerBeat;
+    final isAccent = enPulso && accent && pulso == 0;
+
+    final src = isAccent ? acentoSamples : normalSamples;
+
+    // Mezclar con wrap-around (cola que pasa al inicio del compás)
+    for (var i = 0; i < src.length; i++) {
+      final dst = (pos + i) % totalSamples;
+      final sum = output[dst] + src[i];
+      output[dst] = sum.clamp(-32768, 32767);
+    }
+  }
+
+  return _writeWav(output);
+}
+
+/// Escribe un buffer Int16List como WAV mono 16-bit 44.1 kHz.
+Uint8List _writeWav(Int16List pcm) {
+  final dataLen = pcm.lengthInBytes;
+  final b = ByteData(44 + dataLen);
+  void str(int o, String s) {
+    for (var i = 0; i < s.length; i++) {
+      b.setUint8(o + i, s.codeUnitAt(i));
+    }
+  }
+
+  str(0, 'RIFF');
+  b.setUint32(4, 36 + dataLen, Endian.little);
+  str(8, 'WAVE');
+  str(12, 'fmt ');
+  b.setUint32(16, 16, Endian.little);
+  b.setUint16(20, 1, Endian.little);   // PCM
+  b.setUint16(22, 1, Endian.little);   // mono
+  b.setUint32(24, 44100, Endian.little);
+  b.setUint32(28, 44100 * 2, Endian.little);
+  b.setUint16(32, 2, Endian.little);
+  b.setUint16(34, 16, Endian.little);
+  str(36, 'data');
+  b.setUint32(40, dataLen, Endian.little);
+
+  final bytes = b.buffer.asUint8List();
+  bytes.setRange(44, 44 + dataLen, pcm.buffer.asUint8List());
+  return bytes;
+}
+
+// Helpers para leer WAV (usados en _buildBarWav)
+int _readUint32LE(Uint8List b, int offset) =>
+    b[offset] | (b[offset + 1] << 8) | (b[offset + 2] << 16) | (b[offset + 3] << 24);
+
+int _readUint16LE(Uint8List b, int offset) => b[offset] | (b[offset + 1] << 8);
+
+int _readInt16LE(Uint8List b, int offset) {
+  final v = _readUint16LE(b, offset);
+  return v >= 32768 ? v - 65536 : v;
+}
+
+/// Metrónomo con flutter_soloud: loop de compás + timer visual absoluto.
 class Metronome {
   MetronomeSettings settings;
   Metronome({MetronomeSettings? settings}) : settings = settings ?? MetronomeSettings();
 
   Timer? _timer;
-
-  /// Clips ya generados (fallback audioplayers).
-  Uint8List? _acentoBytes;
-  Uint8List? _normalBytes;
-
-  /// Bytes de todos los 8 slots para SoundPool nativo.
-  final List<Uint8List?> _nativeBytes = List.filled(8, null);
-
-  bool _listo = false;
+  AudioSource? _barSource;
+  SoundHandle? _barHandle;
+  bool _disposed = false;
   bool _preparando = false;
-  bool _nativeReady = false;
+  bool _listo = false;
+  Object? _ultimoError;
   int _click = 0;
-
-  /// Timbre actualmente preparado (para saber si hay que regenerar).
-  ClickSound? _timoPreparado;
-
-  /// Último error de audio (para poder diagnosticar en vez de callarse).
-  Object? ultimoError;
+  ClickSound? _timbrePreparado;
+  int? _prepBpm;
+  int? _prepBeatsPerBar;
+  int? _prepSubdivision;
+  bool? _prepAccent;
 
   /// Se llama en cada click con el índice de pulso dentro del compás
   /// (0 = primer tiempo) y si es el click del acento.
   void Function(int beat, bool acento)? onBeat;
 
-  bool get activo => _timer != null || (_nativeReady && NativeMetronome.available);
-
-  /// true mientras se prepara el sonido.
+  bool get activo => _barHandle != null || _timer != null;
   bool get preparando => _preparando;
-
-  /// true si el sonido quedó listo para reproducir.
   bool get listo => _listo;
+  Object? get ultimoError => _ultimoError;
 
-  /// Prepara los clips y el reproductor. Se puede llamar varias veces;
-  /// devuelve true si el sonido quedó listo.
+  /// Prepara el motor y genera el WAV del compás actual.
   Future<bool> preparar() async {
-    if (_listo && _timoPreparado == settings.clickSound) return true;
+    if (_listo &&
+        _timbrePreparado == settings.clickSound &&
+        _prepBpm == settings.bpm &&
+        _prepBeatsPerBar == settings.beatsPerBar &&
+        _prepSubdivision == settings.subdivision.clicksPerBeat &&
+        _prepAccent == settings.accent) {
+      return true;
+    }
     if (_preparando) return false;
+
     _preparando = true;
     try {
-      final sonido = settings.clickSound;
-      // El acento suena algo más largo y fuerte que el resto.
-      final msAcento = sonido == ClickSound.campana ? 300 : 60;
-      final msNormal = sonido == ClickSound.campana ? 250 : 40;
-
-      _normalBytes = _clickWav(sonido, milliseconds: msNormal, volume: 0.7);
-      _acentoBytes = _clickWav(sonido, milliseconds: msAcento, volume: 1.0);
-      _nativeBytes[_slotFor(sonido, false)] = _normalBytes;
-      _nativeBytes[_slotFor(sonido, true)] = _acentoBytes;
-
-      _timoPreparado = sonido;
-
-      // Fallback audioplayers (para iOS/web/tests).
-      _player ??= AudioPlayer();
-      await _player!.setPlayerMode(PlayerMode.mediaPlayer);
-      await _player!.setReleaseMode(ReleaseMode.stop);
-
-      // Intento nativo (Android).
-      if (NativeMetronome.available) {
-        try {
-          await NativeMetronome.prepare(_nativeBytes.asMap()
-              .map((k, v) => MapEntry(k, v!))
-              .cast<int, Uint8List>());
-          _nativeReady = true;
-        } catch (e) {
-          _nativeReady = false;
-          ultimoError = e; // Guardar error para diagnóstico
-        }
+      // Inicializar SoLoud si no está
+      final so = SoLoud.instance;
+      if (!so.isInitialized) {
+        await so.init();
       }
 
+      // Generar WAV del compás
+      final barWav = _buildBarWav(
+        tipo: settings.clickSound,
+        bpm: settings.bpm,
+        beatsPerBar: settings.beatsPerBar,
+        clicksPerBeat: settings.subdivision.clicksPerBeat,
+        accent: settings.accent,
+      );
+
+      // Cargar en SoLoud (nombre único para forzar reload)
+      final name = 'metro_bar_${settings.clickSound.index}_${settings.bpm}_${settings.beatsPerBar}_${settings.subdivision.index}_${settings.accent ? 1 : 0}';
+      _barSource = await so.loadMem(name, barWav);
+
+      // Guardar parámetros de preparación
+      _timbrePreparado = settings.clickSound;
+      _prepBpm = settings.bpm;
+      _prepBeatsPerBar = settings.beatsPerBar;
+      _prepSubdivision = settings.subdivision.clicksPerBeat;
+      _prepAccent = settings.accent;
+
       _listo = true;
-      ultimoError = null;
+      _ultimoError = null;
       return true;
     } catch (e) {
-      // No se calla: guardamos el error para poder mostrarlo.
-      ultimoError = e;
+      _ultimoError = e;
       _listo = false;
       return false;
     } finally {
@@ -259,114 +353,147 @@ class Metronome {
     }
   }
 
-  /// Regenera los clips (al cambiar el tipo de sonido).
+  /// Regenera el compás (al cambiar timbre, BPM, compás, subdivisión o acento).
   Future<void> regenerarSonido() async {
+    stop();
     _listo = false;
-    _nativeReady = false;
-    _timoPreparado = null;
+    _timbrePreparado = null;
+    _prepBpm = null;
+    _prepBeatsPerBar = null;
+    _prepSubdivision = null;
+    _prepAccent = null;
+    if (_barSource != null) {
+      try {
+        await SoLoud.instance.disposeSource(_barSource!);
+      } catch (_) {}
+      _barSource = null;
+    }
     await preparar();
   }
 
-  /// Fallback audioplayers para iOS/web/tests.
-  AudioPlayer? _player;
-
-  void _onNativeBeat(int beat, bool acento) {
-    onBeat?.call(beat, acento);
-  }
-
+  /// Inicia el loop del compás y el timer visual.
   void start() {
-    if (_timer != null || (_nativeReady && NativeMetronome.available)) return;
+    if (_disposed) return;
+    if (activo) return;
+
     _click = 0;
 
-    if (_nativeReady && NativeMetronome.available) {
-      // Nativo: inicia hilo dedicado con timing absoluto
-      NativeMetronome.addBeatListener(_onNativeBeat);
-      NativeMetronome.start(
-        bpm: settings.bpm,
-        beatsPerBar: settings.beatsPerBar,
-        subdivision: settings.subdivision.clicksPerBeat,
-        timbre: settings.clickSound.index,
-        accent: settings.accent,
-        soundOn: settings.sound,
-      );
-      return;
+    if (settings.sound && _listo && _barSource != null) {
+      try {
+        _barHandle = SoLoud.instance.play(_barSource!, looping: true);
+      } catch (e) {
+        _ultimoError = e;
+        _barHandle = null;
+      }
     }
 
-    // Fallback Dart (iOS/web/tests) - solo negras/corcheas
-    _programar();
-    Timer.run(_sonar);
+    // Timer visual con programación absoluta (sin jitter acumulado)
+    _iniciarTimerVisual();
   }
 
-  void _programar() {
+  void _iniciarTimerVisual() {
     _timer?.cancel();
+    _click = 0;
     final porPulso = settings.subdivision.clicksPerBeat;
     final micros = (60000000 / settings.bpm / porPulso).round();
-    // Usar microsegundos directamente para precisión en BPM altos + subdivisiones.
-    _timer = Timer.periodic(Duration(microseconds: micros), (_) => _sonar());
-  }
+    var nextTime = DateTime.now().microsecondsSinceEpoch;
 
-  void restart() {
-    if (_timer == null && !(_nativeReady && NativeMetronome.available)) return;
-    _click = 0;
+    void tick() {
+      if (_disposed || _timer == null) return;
 
-    if (_nativeReady && NativeMetronome.available) {
-      // Nativo: actualizar ajustes en caliente (el hilo sigue corriendo)
-      NativeMetronome.updateSettings(
-        bpm: settings.bpm,
-        beatsPerBar: settings.beatsPerBar,
-        subdivision: settings.subdivision.clicksPerBeat,
-        timbre: settings.clickSound.index,
-        accent: settings.accent,
-        soundOn: settings.sound,
-      );
-      return;
+      final now = DateTime.now().microsecondsSinceEpoch;
+      final interval = micros;
+
+      // Si llegamos tarde, saltar al siguiente tiempo absoluto (no acumular retraso)
+      if (now > nextTime + interval) {
+        final elapsed = now - nextTime;
+        final skipped = (elapsed / interval).floor() + 1;
+        nextTime += skipped * interval;
+        _click += skipped;
+      }
+
+      final enPulso = _click % porPulso == 0;
+      final pulso = _click ~/ porPulso;
+      final beat = pulso % settings.beatsPerBar;
+      final acento = enPulso && settings.accent && beat == 0;
+
+      onBeat?.call(beat, acento);
+      _click++;
+      nextTime += interval;
+
+      // Programar siguiente tick
+      final sleepMicros = nextTime - DateTime.now().microsecondsSinceEpoch;
+      if (sleepMicros > 0) {
+        _timer = Timer(Duration(microseconds: sleepMicros), tick);
+      } else {
+        // Ya pasó el tiempo, ejecutar en siguiente microtask
+        Timer.run(tick);
+      }
     }
 
-    _programar();
-    Timer.run(_sonar);
+    Timer.run(tick);
   }
 
+  /// Reinicia el metrónomo (cambio de BPM, compás, subdivisión, timbre).
+  /// Reconstruye el WAV y reinicia en el tiempo 1.
+  void restart() {
+    if (_disposed) return;
+    stop();
+    _listo = false;
+    _timbrePreparado = null;
+    _prepBpm = null;
+    _prepBeatsPerBar = null;
+    _prepSubdivision = null;
+    _prepAccent = null;
+    if (_barSource != null) {
+      SoLoud.instance.disposeSource(_barSource!);
+      _barSource = null;
+    }
+    // prepararse y arrancar de nuevo se hace desde el controlador
+  }
+
+  /// Detiene el metrónomo (audio y timer visual).
   void stop() {
+    if (_barHandle != null) {
+      try {
+        SoLoud.instance.stop(_barHandle!);
+      } catch (_) {}
+      _barHandle = null;
+    }
     _timer?.cancel();
     _timer = null;
     _click = 0;
-
-    if (_nativeReady && NativeMetronome.available) {
-      NativeMetronome.removeBeatListener(_onNativeBeat);
-      NativeMetronome.stop();
-    }
-  }
-
-  void _sonar() {
-    final porPulso = settings.subdivision.clicksPerBeat;
-    final enPulso = _click % porPulso == 0;
-    final pulso = _click ~/ porPulso;
-    final beat = pulso % settings.beatsPerBar;
-    final acento = enPulso && settings.accent && beat == 0;
-
-    if (settings.sound && _listo) {
-      _playFallback(acento);
-    }
-    onBeat?.call(beat, acento);
-    _click++;
-  }
-
-  void _playFallback(bool acento) {
-    if (_player == null) return;
-    final bytes = acento ? _acentoBytes : _normalBytes;
-    if (bytes != null) {
-      _player!.play(BytesSource(bytes), volume: acento ? 1.0 : 0.75);
-    }
   }
 
   Future<void> dispose() async {
+    _disposed = true;
     stop();
-    await _player?.dispose();
-    _player = null;
-    if (_nativeReady) {
-      await NativeMetronome.dispose();
-      _nativeReady = false;
+    if (_barSource != null) {
+      try {
+        await SoLoud.instance.disposeSource(_barSource!);
+      } catch (_) {}
+      _barSource = null;
     }
     _listo = false;
   }
+
+  /// Para tests: permite reiniciar el contador de clicks sin detener el metrónomo.
+  @visibleForTesting
+  void resetClickCount() => _click = 0;
+
+  /// Para tests: expone el generador de compás.
+  @visibleForTesting
+  static Uint8List buildBarWavForTest({
+    required ClickSound tipo,
+    required int bpm,
+    required int beatsPerBar,
+    required int clicksPerBeat,
+    required bool accent,
+  }) => _buildBarWav(
+        tipo: tipo,
+        bpm: bpm,
+        beatsPerBar: beatsPerBar,
+        clicksPerBeat: clicksPerBeat,
+        accent: accent,
+      );
 }

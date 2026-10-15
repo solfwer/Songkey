@@ -73,16 +73,29 @@ class MetronomeController extends ChangeNotifier {
     settings.bpm = valor;
     store.setMetroBpm(valor);
     if (activo) {
-      metronome.stop();
-      metronome.start();
+      metronome.restart();
+      _reprepareAndStart();
     }
     notifyListeners();
+  }
+
+  /// Re-prepara y arranca tras un cambio de parámetros (BPM, compás, subdivisión, timbre).
+  Future<void> _reprepareAndStart() async {
+    final listo = await metronome.preparar();
+    if (!listo && settings.sound) {
+      onSonidoNoDisponible?.call();
+    }
+    metronome.start();
   }
 
   void setCompas(int beats, int unit) {
     settings.beatsPerBar = beats;
     settings.beatUnit = unit;
     store.setMetroTime(beats, unit);
+    if (activo) {
+      metronome.restart();
+      _reprepareAndStart();
+    }
     notifyListeners();
   }
 
@@ -90,8 +103,8 @@ class MetronomeController extends ChangeNotifier {
     settings.subdivision = s;
     store.setMetroSubdivision(s);
     if (activo) {
-      metronome.stop();
-      metronome.start();
+      metronome.restart();
+      _reprepareAndStart();
     }
     notifyListeners();
   }
@@ -118,6 +131,7 @@ class MetronomeController extends ChangeNotifier {
     // Si estaba sonando, reiniciamos con el sonido nuevo.
     if (activo) {
       metronome.restart();
+      await _reprepareAndStart();
     }
     notifyListeners();
   }
