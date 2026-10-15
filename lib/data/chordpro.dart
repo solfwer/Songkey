@@ -759,3 +759,72 @@ String roundTrip(String text) {
   final song = parser.parse(text);
   return const ChordProSerializer().write(song);
 }
+
+/// Divide un archivo ChordPro que puede contener varias canciones
+/// en una lista de textos, uno por canción.
+/// Reglas de división:
+/// 1. Si existe la directiva `{new_song}` -> divide ahí.
+/// 2. Si no, divide en cada `{title:}` / `{t:}` posterior al primero.
+/// 3. Descarta chunks vacíos (solo metadatos, sin líneas de contenido).
+/// 4. Sin separadores claros -> devuelve el texto original como 1 canción.
+List<String> splitChordProSongs(String text) {
+  final lines = text.replaceAll('\r', '').split('\n');
+  final splits = <int>[];
+
+  // Buscar {new_song} primero
+  for (var i = 0; i < lines.length; i++) {
+    final line = lines[i].trim().toLowerCase();
+    if (line.startsWith('{new_song') || line == 'new_song') {
+      splits.add(i);
+    }
+  }
+
+  // Si no hay new_song, buscar {title:} / {t:} después del primero
+  if (splits.isEmpty) {
+    bool firstTitleFound = false;
+    for (var i = 0; i < lines.length; i++) {
+      final line = lines[i].trim().toLowerCase();
+      if (line.startsWith('{title:') || line.startsWith('{t:')) {
+        if (firstTitleFound) {
+          splits.add(i);
+        } else {
+          firstTitleFound = true;
+        }
+      }
+    }
+  }
+
+  // Si no hay divisiones, devolver el texto original
+  if (splits.isEmpty) return [text];
+
+  // Añadir el final del texto como límite
+  splits.add(lines.length);
+
+  // Construir chunks
+  final chunks = <String>[];
+  var start = 0;
+  for (final end in splits) {
+    final chunkLines = lines.sublist(start, end);
+    final chunk = chunkLines.join('\n').trim();
+    // Solo mantener si tiene contenido real (líneas no vacías que no sean solo metadatos)
+    if (_hasRealContent(chunkLines)) {
+      chunks.add(chunk);
+    }
+    start = end;
+  }
+
+  return chunks.isEmpty ? [text] : chunks;
+}
+
+/// Verifica si un chunk tiene contenido real (líneas de letra/acordes, no solo metadatos).
+bool _hasRealContent(List<String> lines) {
+  for (final line in lines) {
+    final trimmed = line.trim();
+    if (trimmed.isEmpty) continue;
+    // Saltar líneas de metadatos y directivas de sección
+    if (trimmed.startsWith('{') && (trimmed.contains(':') || trimmed.contains('start_of') || trimmed.contains('end_of') || trimmed.contains('comment') || trimmed.contains('new_song'))) continue;
+    // Si hay algo que parece letra o acordes, es contenido real
+    return true;
+  }
+  return false;
+}

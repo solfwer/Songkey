@@ -105,28 +105,45 @@ void main() {
       c.dispose();
     });
 
-    test('el BPM se adapta al de la canción', () {
+    testWidgets('el BPM se adapta al de la canción', (tester) async {
       final store = Store();
       final c = _ctrl(store);
       c.settings.bpm = 80;
       // Canción sin BPM: se respeta el que tenías.
       c.syncWithSong(Song(id: 's1', title: 'Sin bpm', key: 'C', body: 'x'));
+      // No cambia porque no hay BPM en la canción.
       expect(c.settings.bpm, 80);
-      // Canción con BPM: se adapta.
+      // Canción con BPM: se adapta (async via post-frame).
       c.syncWithSong(Song(id: 's2', title: 'Con bpm', key: 'C', body: 'x', bpm: 140));
+      // Construir un widget que use el store para que el post-frame se dispare.
+      await tester.pumpWidget(MaterialApp(
+        home: AnimatedBuilder(
+          animation: store,
+          builder: (_, __) => const SizedBox.shrink(),
+        ),
+      ));
+      await tester.pump();
       expect(c.settings.bpm, 140);
       c.dispose();
     });
 
-    test('no resetea el BPM al reconstruir la misma canción', () {
+    testWidgets('no resetea el BPM al reconstruir la misma canción', (tester) async {
       final store = Store();
       final c = _ctrl(store);
       c.syncWithSong(Song(id: 's1', title: 'Con bpm', key: 'C', body: 'x', bpm: 100));
+      await tester.pumpWidget(MaterialApp(
+        home: AnimatedBuilder(
+          animation: store,
+          builder: (_, __) => const SizedBox.shrink(),
+        ),
+      ));
+      await tester.pump();
       expect(c.settings.bpm, 100);
       // El usuario lo cambia a mano...
       c.setBpm(130);
       // ...y al reconstruir la misma canción no vuelve a 100.
       c.syncWithSong(Song(id: 's1', title: 'Con bpm', key: 'C', body: 'x', bpm: 100));
+      await tester.pump();
       expect(c.settings.bpm, 130);
       c.dispose();
     });

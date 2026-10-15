@@ -1,6 +1,7 @@
 // Controles del metrónomo: botón para el AppBar, barra compacta mientras suena
 // y panel de configuración (BPM, compás, subdivisión, acento, sonido).
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../../../data/store.dart';
 import '../../../models/song.dart';
@@ -46,13 +47,25 @@ class MetronomeController extends ChangeNotifier {
 
   /// Ajusta el BPM al de la canción, pero solo al cambiar de canción y solo si
   /// la canción tiene BPM definido (si no, se respeta el último usado).
+  /// Se ejecuta en post-frame para evitar setState() durante build.
   void syncWithSong(Song song) {
     if (_lastSongId == song.id) return;
     _lastSongId = song.id;
     final bpm = song.bpm;
     if (bpm != null && bpm > 0 && bpm != settings.bpm) {
-      setBpm(bpm);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_disposed) setBpm(bpm);
+      });
     }
+  }
+
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    metronome.dispose();
+    super.dispose();
   }
 
   void setBpm(int v) {
@@ -169,12 +182,6 @@ class MetronomeController extends ChangeNotifier {
       }
     }
     _lastTap = now;
-  }
-
-  @override
-  void dispose() {
-    metronome.dispose();
-    super.dispose();
   }
 }
 

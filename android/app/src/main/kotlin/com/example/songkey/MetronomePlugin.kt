@@ -6,6 +6,8 @@ import android.media.AudioAttributes
 import android.media.SoundPool
 import android.os.Build
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import androidx.annotation.RequiresApi
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
@@ -180,10 +182,13 @@ class MetronomePlugin : FlutterPlugin, MethodCallHandler {
                 }
 
                 // Notificar a Dart para el indicador visual (beat, acento)
-                channel?.invokeMethod("onBeat", {
-                    "beat" to beat.toInt()
-                    "accent" to acento
-                })
+                // Debe ejecutarse en el hilo principal de Android (UI thread)
+                Handler(Looper.getMainLooper()).post {
+                    channel?.invokeMethod("onBeat", mapOf(
+                        "beat" to beat.toInt(),
+                        "accent" to acento
+                    ))
+                }
             }
 
             clickCount++
