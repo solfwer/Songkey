@@ -62,7 +62,10 @@ class Store extends ChangeNotifier {
     metroBpm = prefs.getInt('songkey-metro-bpm') ?? 120;
     metroBeats = prefs.getInt('songkey-metro-beats') ?? 4;
     metroBeatUnit = prefs.getInt('songkey-metro-unit') ?? 4;
-    metroSub = prefs.getInt('songkey-metro-sub') ?? 0;
+    // Migración: antes había 4 subdivisiones (0-3), ahora solo 2 (0=negra, 1=corchea).
+    // Si el valor guardado era 2 o 3, recortar a 1.
+    final savedSub = prefs.getInt('songkey-metro-sub') ?? 0;
+    metroSub = savedSub.clamp(0, 1);
     metroClick = prefs.getInt('songkey-metro-click') ?? 0;
     metroAccent = prefs.getBool('songkey-metro-accent') ?? true;
     metroSound = prefs.getBool('songkey-metro-sound') ?? true;

@@ -1,8 +1,8 @@
 // Metrónomo: sonido e indicador visual del beat.
 //
-// Los clicks se generan como WAV en memoria y se reproducen con SoundPool
-// nativo en Android (un solo `play()` por click, latencia ~5 ms).
-// En iOS/web/tests cae a `audioplayers` con BytesSource.
+// En Android el loop de tiempo corre en un hilo nativo dedicado (timing absoluto,
+// sin acumular jitter) y Dart solo recibe callbacks onBeat.
+// En iOS/web/tests cae a `audioplayers` con BytesSource (solo negras/corcheas).
 import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
@@ -37,13 +37,7 @@ enum Subdivision {
   negra(1, 'Negras'),
 
   /// 2 clicks por pulso.
-  corchea(2, 'Corcheas'),
-
-  /// 3 clicks por pulso.
-  tresillo(3, 'Tresillos'),
-
-  /// 4 clicks por pulso.
-  semicorchea(4, 'Semicorcheas');
+  corchea(2, 'Corcheas');
 
   final int clicksPerBeat;
   final String label;
@@ -102,7 +96,7 @@ Uint8List _clickWav(ClickSound tipo, {required int milliseconds, required double
   const sampleRate = 44100;
   final total = (sampleRate * milliseconds / 1000).round();
   final data = ByteData(44 + total * 2);
-  final rng = Random(1234);
+  final rng = Random(12345);
 
   void tag(String s, int offset) {
     for (var i = 0; i < s.length; i++) {
@@ -178,7 +172,7 @@ Uint8List _clickWav(ClickSound tipo, {required int milliseconds, required double
 /// 4-7 = acento (click, bip, caja, campana)
 int _slotFor(ClickSound tipo, bool acento) => acento ? tipo.index + 4 : tipo.index;
 
-/// Metrónomo con sonido, vibración y aviso del beat.
+/// Metrónomo con sonido y aviso del beat.
 class Metronome {
   MetronomeSettings settings;
   Metronome({MetronomeSettings? settings}) : settings = settings ?? MetronomeSettings();
@@ -207,7 +201,7 @@ class Metronome {
   /// (0 = primer tiempo) y si es el click del acento.
   void Function(int beat, bool acento)? onBeat;
 
-  bool get activo => _timer != null;
+  bool get activo => _timer != null || (_nativeReady && NativeMetronome.available);
 
   /// true mientras se prepara el sonido.
   bool get preparando => _preparando;
@@ -276,11 +270,30 @@ class Metronome {
   /// Fallback audioplayers para iOS/web/tests.
   AudioPlayer? _player;
 
+  void _onNativeBeat(int beat, bool acento) {
+    onBeat?.call(beat, acento);
+  }
+
   void start() {
-    if (_timer != null) return;
+    if (_timer != null || (_nativeReady && NativeMetronome.available)) return;
     _click = 0;
+
+    if (_nativeReady && NativeMetronome.available) {
+      // Nativo: inicia hilo dedicado con timing absoluto
+      NativeMetronome.addBeatListener(_onNativeBeat);
+      NativeMetronome.start(
+        bpm: settings.bpm,
+        beatsPerBar: settings.beatsPerBar,
+        subdivision: settings.subdivision.clicksPerBeat,
+        timbre: settings.clickSound.index,
+        accent: settings.accent,
+        soundOn: settings.sound,
+      );
+      return;
+    }
+
+    // Fallback Dart (iOS/web/tests) - solo negras/corcheas
     _programar();
-    // Primer click inmediato sin esperar al timer (evita doble click si el timer dispara rápido).
     Timer.run(_sonar);
   }
 
@@ -293,8 +306,22 @@ class Metronome {
   }
 
   void restart() {
-    if (_timer == null) return;
+    if (_timer == null && !(_nativeReady && NativeMetronome.available)) return;
     _click = 0;
+
+    if (_nativeReady && NativeMetronome.available) {
+      // Nativo: actualizar ajustes en caliente (el hilo sigue corriendo)
+      NativeMetronome.updateSettings(
+        bpm: settings.bpm,
+        beatsPerBar: settings.beatsPerBar,
+        subdivision: settings.subdivision.clicksPerBeat,
+        timbre: settings.clickSound.index,
+        accent: settings.accent,
+        soundOn: settings.sound,
+      );
+      return;
+    }
+
     _programar();
     Timer.run(_sonar);
   }
@@ -303,6 +330,11 @@ class Metronome {
     _timer?.cancel();
     _timer = null;
     _click = 0;
+
+    if (_nativeReady && NativeMetronome.available) {
+      NativeMetronome.removeBeatListener(_onNativeBeat);
+      NativeMetronome.stop();
+    }
   }
 
   void _sonar() {
@@ -313,18 +345,7 @@ class Metronome {
     final acento = enPulso && settings.accent && beat == 0;
 
     if (settings.sound && _listo) {
-      if (_nativeReady) {
-        // Nativo: una llamada, latencia ~5 ms, permite solapamiento.
-        final slot = _slotFor(settings.clickSound, acento);
-        final volume = acento ? 1.0 : 0.75;
-        NativeMetronome.play(slot, volume).catchError((_) {
-          // Fallback silencioso si el canal falla en runtime.
-          _nativeReady = false;
-          _playFallback(acento);
-        });
-      } else {
-        _playFallback(acento);
-      }
+      _playFallback(acento);
     }
     onBeat?.call(beat, acento);
     _click++;
