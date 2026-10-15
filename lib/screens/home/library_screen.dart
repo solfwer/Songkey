@@ -12,8 +12,6 @@ import '../../data/store.dart';
 import '../../models/app_state.dart';
 import '../../models/song.dart';
 import '../../services/pdf_import.dart';
-import '../../models/song.dart';
-import '../../services/pdf_import.dart';
 import '../../theme.dart';
 import '../song/song_editor_page.dart';
 import '../song/song_screen.dart';
