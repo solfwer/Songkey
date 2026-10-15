@@ -55,10 +55,6 @@ class SettingsScreen extends StatelessWidget {
           subtitle: const Text('Añade canciones desde un archivo compartido'),
           onTap: () => importLibrary(context, store),
         ),
-        // Copia de seguridad
-        const Divider(),
-        const ListTile(title: Text('Copia de seguridad', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
-        _BackupSection(store: store),
         const Divider(),
         const ListTile(title: Text('Preferencias', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
         SwitchListTile(
@@ -178,85 +174,5 @@ class _AboutSectionState extends State<_AboutSection> {
         ),
       ),
     ]);
-  }
-}
-
-/// Sección de copia de seguridad en Ajustes.
-class _BackupSection extends StatelessWidget {
-  final Store store;
-  const _BackupSection({required this.store});
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: store,
-      builder: (context, _) {
-        final last = store.lastBackupAt;
-        final auto = store.autoBackupOnExit;
-        final now = DateTime.now();
-        final daysSince = last != null ? now.difference(last).inDays : null;
-        final showWarning = last == null || (daysSince != null && daysSince > 14);
-
-        return Column(children: [
-          // Aviso ámbar si no hay copia o es antigua
-          if (showWarning)
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.amber.shade100,
-                border: Border.all(color: Colors.amber.shade700),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(children: [
-                Icon(Icons.warning_amber_rounded, color: Colors.amber.shade800),
-                const SizedBox(width: 8),
-                Expanded(child: Text(
-                  last == null
-                      ? 'No hay copia de seguridad. Usa "Crear copia ahora" para proteger tus canciones.'
-                      : 'La última copia tiene $daysSince días. Haz una nueva para estar tranquilo.',
-                  style: TextStyle(color: Colors.amber.shade900, fontSize: 13),
-                )),
-              ]),
-            ),
-
-          // Última copia
-          ListTile(
-            leading: Icon(Icons.history, color: last != null ? AppColors.accent : Colors.grey),
-            title: const Text('Última copia'),
-            subtitle: Text(last != null
-                ? '${_formatDate(last!)} (hace ${daysSince ?? 0} día${daysSince == 1 ? '' : 's'})'
-                : 'Nunca'),
-          ),
-
-          // Botón crear copia ahora
-          ListTile(
-            leading: const Icon(Icons.backup, color: AppColors.accent),
-            title: const Text('Crear copia ahora'),
-            subtitle: const Text('Exporta toda la biblioteca a JSON y la guarda en el dispositivo'),
-            onTap: () async {
-              Navigator.of(context).pop(); // cierra el drawer de ajustes
-              await shareLibrary(context, store);
-              store.recordBackup();
-            },
-          ),
-
-          // Switch copia automática al salir
-          SwitchListTile(
-            title: const Text('Copia automática al salir'),
-            subtitle: const Text('Al cerrar la app, si hay cambios, guarda una copia en segundo plano'),
-            value: store.autoBackupOnExit,
-            onChanged: (v) => store.setAutoBackupOnExit(v),
-            secondary: const Icon(Icons.autorenew, color: AppColors.accent),
-          ),
-        ]);
-      },
-    );
-  }
-
-  String _formatDate(DateTime d) {
-    final months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
-    return '${d.day} ${months[d.month - 1]} ${d.year}';
   }
 }
