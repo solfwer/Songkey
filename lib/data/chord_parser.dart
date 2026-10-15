@@ -318,8 +318,12 @@ List<Section> sectionsInOrder(String body, List<String>? structure) {
 const _sharps = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const _flats = {'Db': 'C#', 'Eb': 'D#', 'Gb': 'F#', 'Ab': 'G#', 'Bb': 'A#', 'Cb': 'B', 'Fb': 'E'};
 
-/// Los 12 tonos (sostenidos), útiles para selectores de tonalidad.
-const twelveKeys = _sharps;
+/// Los 24 tonos (mayores y menores) para selectores de tonalidad.
+const twelveKeys = [
+  'C', 'Cm', 'C#', 'C#m', 'D', 'Dm', 'D#', 'D#m',
+  'E', 'Em', 'F', 'Fm', 'F#', 'F#m', 'G', 'Gm',
+  'G#', 'G#m', 'A', 'Am', 'A#', 'A#m', 'B', 'Bm',
+];
 
 /// Nombres en notación latina (Do, Re, Mi...) para cada nota, con sus
 /// alteraciones más habituales en castellano (Sib, Mib, Do#...).
@@ -345,7 +349,14 @@ String _shiftNote(String n, int st) {
 }
 
 /// Escritura canónica con sostenidos: "Eb" -> "D#", "Ab" -> "G#"...
-String sharpen(String note) => _flats[note] ?? note;
+/// También maneja tonos menores: "Bbm" -> "A#m", "Ebm" -> "D#m".
+String sharpen(String note) {
+  if (note.endsWith('m')) {
+    final root = sharpen(note.substring(0, note.length - 1));
+    return '${root}m';
+  }
+  return _flats[note] ?? note;
+}
 
 String transposeChord(String chord, int st) {
   if (st == 0) return chord;

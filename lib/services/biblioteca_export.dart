@@ -145,8 +145,8 @@ Future<void> shareLibrary(BuildContext context, Store store) async {
   if (opcion) {
     // Guardar en el telefono
     final bytes = utf8.encode(encodeLibrary(store.state));
-    final nombre = datedFileName('Songkey_biblioteca', 'json');
-    final ruta = await saveBytesToDevice(bytes: bytes, fileName: nombre, mimeType: 'application/json');
+    final nombre = datedFileName('Songkey_biblioteca', 'songkey');
+    final ruta = await saveBytesToDevice(bytes: bytes, fileName: nombre, mimeType: 'application/octet-stream');
     if (!context.mounted) return;
     if (ruta != null) {
       messenger.showSnackBar(SnackBar(content: Text('Biblioteca guardada: $ruta'), duration: const Duration(seconds: 5)));
@@ -160,10 +160,10 @@ Future<void> shareLibrary(BuildContext context, Store store) async {
   final origin = shareOrigin(context);
   try {
     final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/Songkey_biblioteca.json');
+    final file = File('${dir.path}/Songkey_biblioteca.songkey');
     await file.writeAsString(encodeLibrary(store.state));
     await Share.shareXFiles(
-      [XFile(file.path, mimeType: 'application/json', name: 'Songkey_biblioteca.json')],
+      [XFile(file.path, mimeType: 'application/octet-stream', name: 'Songkey_biblioteca.songkey')],
       text: 'Mi biblioteca de Songkey (canciones y grupos)',
       sharePositionOrigin: origin,
     );
@@ -206,32 +206,13 @@ Future<void> importLibrary(BuildContext context, Store store) async {
     return;
   }
 
-  // Mostrar diálogo de vista previa con opciones
+  // Mostrar diálogo de vista previa con opciones (pasando el raw ya leído)
   if (!context.mounted) return;
-  await _showImportPreviewDialog(context, store);
+  await _showImportPreviewDialog(context, store, raw);
 }
 
 /// Muestra un diálogo de vista previa con opciones de importación
-Future<void> _showImportPreviewDialog(BuildContext context, Store store) async {
-  // Parsear el JSON para obtener la vista previa
-  final result = await FilePicker.platform.pickFiles(
-    type: FileType.custom,
-    allowedExtensions: ['json', 'songkey'],
-    withData: true,
-  );
-  
-  if (result == null || result.files.isEmpty) return;
-  final file = result.files.single;
-  final bytes = file?.bytes;
-  if (file == null || bytes == null) return;
-
-  String raw;
-  try {
-    raw = utf8.decode(bytes);
-  } catch (_) {
-    return;
-  }
-
+Future<void> _showImportPreviewDialog(BuildContext context, Store store, String raw) async {
   // Parsear para vista previa
   final data = jsonDecode(raw) as Map<String, dynamic>;
   final songsJson = (data['songs'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
@@ -240,35 +221,42 @@ Future<void> _showImportPreviewDialog(BuildContext context, Store store) async {
   // Analizar duplicados
   final storeState = store.state;
   final existingTitles = {for (final s in storeState.songs) s.title.trim().toLowerCase()};
-  final existingSongsMap = {for (final s in storeState.songs) s.title.trim().toLowerCase(): s};
+  final existingGroupsByName = {for (final g in storeState.groups) g.name.trim().toLowerCase()};
 
-  final duplicateSongs = <Song>[];
-  final newSongs = <Song>[];
-  final newGroups = <Group>[];
+  int newSongsCount = 0;
+  int duplicateSongsCount = 0;
+  int newGroupsCount = 0;
 
-  for (final j in (data['songs'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList()) {
+  for (final j in songsJson) {
     final song = Song.fromJson(j);
     final t = song.title.trim();
     final lowerTitle = t.toLowerCase();
     if (existingTitles.contains(lowerTitle)) {
-      // Canción duplicada
-      // Podemos guardar para mostrar en el diálogo
+      duplicateSongsCount++;
     } else {
-      newSongs.add(song);
+      newSongsCount++;
+    }
+  }
+
+  for (final g in groupsJson) {
+    final group = Group.fromJson(g);
+    final name = group.name.trim().toLowerCase();
+    if (!existingGroupsByName.contains(name) && name.isNotEmpty) {
+      newGroupsCount++;
     }
   }
 
   if (!context.mounted) return;
 
   final messenger = ScaffoldMessenger.of(context);
-  
+
   // Mostrar diálogo de confirmación con vista previa
   final updateExisting = await showDialog<bool>(
     context: context,
     builder: (context) => _ImportPreviewDialog(
-      newSongsCount: 0, // TODO: contar correctamente
-      duplicateSongsCount: 0, // TODO: contar correctamente
-      newGroupsCount: 0, // TODO: contar correctamente
+      newSongsCount: newSongsCount,
+      duplicateSongsCount: duplicateSongsCount,
+      newGroupsCount: newGroupsCount,
     ),
   );
 

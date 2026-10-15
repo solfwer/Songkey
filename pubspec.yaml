@@ -18,6 +18,7 @@ dependencies:
   package_info_plus: ^9.0.1
   flutter_file_dialog: ^3.3.3
   flutter_soloud: ^5.2.1
+  receive_sharing_intent: ^1.9.0
 
 dev_dependencies:
   flutter_test:

@@ -10,6 +10,7 @@ import '../../data/chordpro.dart';
 import '../../data/format.dart';
 import '../../data/store.dart';
 import '../../models/app_state.dart';
+import '../../models/setlist.dart';
 import '../../models/song.dart';
 import 'widgets/pdf_import_button.dart';
 import 'song_editor_tabs.dart';
@@ -19,12 +20,13 @@ class SongEditorPage extends StatefulWidget {
   final Store store;
   final Song? song;
   final String? initialGroupId;
+  final String? setlistId; // Si no es null, guarda como override en este setlist
 
   /// Borrador inicial (sin canción guardada todavía) para importaciones de PDF
   /// o documentos ChordPro. Solo se usa si [song] es null.
   final String? initialTitle;
   final String? initialBody;
-  const SongEditorPage({super.key, required this.store, this.song, this.initialGroupId, this.initialTitle, this.initialBody});
+  const SongEditorPage({super.key, required this.store, this.song, this.initialGroupId, this.initialTitle, this.initialBody, this.setlistId});
 
   @override
   State<SongEditorPage> createState() => _SongEditorPageState();
@@ -305,10 +307,34 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
       lastOpenedAt: widget.song?.lastOpenedAt,
       structure: _structure,
     );
-    widget.store.update((s) {
-      final songs = s.songs.any((x) => x.id == id) ? s.songs.map((x) => x.id == id ? song : x).toList() : [song, ...s.songs];
-      return AppState(groups: s.groups, songs: songs, setlists: s.setlists);
-    });
+
+    if (widget.setlistId != null) {
+      // Guardar como override en el setlist (no toca la canción original)
+      final override = SongOverride(
+        songId: id,
+        title: song.title,
+        author: song.author,
+        key: song.key,
+        bpm: song.bpm,
+        body: song.body,
+        style: song.style,
+        durationSec: song.durationSec,
+        structure: song.structure,
+      );
+      widget.store.update((s) {
+        final setlists = s.setlists.map((l) {
+          if (l.id != widget.setlistId) return l;
+          return l.withOverride(id, override);
+        }).toList();
+        return AppState(groups: s.groups, songs: s.songs, setlists: setlists);
+      });
+    } else {
+      // Guardar en la biblioteca (comportamiento original)
+      widget.store.update((s) {
+        final songs = s.songs.any((x) => x.id == id) ? s.songs.map((x) => x.id == id ? song : x).toList() : [song, ...s.songs];
+        return AppState(groups: s.groups, songs: songs, setlists: s.setlists);
+      });
+    }
     // No se cierra la pantalla: el botn pasa a decir "Guardado" para que se
     // vea claro. Vuelve a "Guardar" en cuanto se toque algo.
     setState(() => _guardado = true);

@@ -77,8 +77,10 @@ class SetlistSongsScreen extends StatelessWidget {
             else
               for (var i = 0; i < l.songIds.length; i++)
                 Builder(builder: (context) {
-                  final song = store.state.songs.where((x) => x.id == l.songIds[i]).firstOrNull;
-                  if (song == null) return const SizedBox.shrink();
+                  final baseSong = store.state.songs.where((x) => x.id == l.songIds[i]).firstOrNull;
+                  if (baseSong == null) return const SizedBox.shrink();
+                  final override = l.getOverride(baseSong.id);
+                  final song = override?.toSong() ?? baseSong;
                   final isReady = l.readyIds.contains(song.id);
                   return Card(
                     child: ListTile(

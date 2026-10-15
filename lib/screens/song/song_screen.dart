@@ -75,6 +75,15 @@ class _SongScreenState extends State<SongScreen> {
     return list.songIds.where((id) => s.songs.any((x) => x.id == id)).toList();
   }
 
+  /// Resuelve la canción a mostrar: si hay override en el setlist, usa ese.
+  Song _resolveSong(Song original, AppState s) {
+    if (widget.setlistId == null) return original;
+    final list = s.setlists.where((l) => l.id == widget.setlistId).firstOrNull;
+    if (list == null) return original;
+    final override = list.getOverride(original.id);
+    return override?.toSong() ?? original;
+  }
+
   void _onPageChanged(int p) {
     final ids = _setlistSongIds(widget.store.state);
     if (p < 0 || p >= ids.length) return;
@@ -88,11 +97,28 @@ class _SongScreenState extends State<SongScreen> {
   Future<void> _delete(Song song) async {
     final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(title: Text('¿Eliminar "${song.title}"?'), actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Eliminar'))]));
     if (ok == true) {
-      widget.store.update((st) => AppState(
-            groups: st.groups,
-            songs: st.songs.where((x) => x.id != song.id).toList(),
-            setlists: st.setlists.map((l) => l.copyWith(songIds: l.songIds.where((i) => i != song.id).toList(), readyIds: l.readyIds.where((i) => i != song.id).toList())).toList(),
-          ));
+      if (widget.setlistId != null) {
+        // Desde setlist: solo quita del setlist y borra override, NO borra la canción original
+        widget.store.update((st) => AppState(
+              groups: st.groups,
+              songs: st.songs,
+              setlists: st.setlists.map((l) {
+                if (l.id != widget.setlistId) return l;
+                return l.copyWith(
+                  songIds: l.songIds.where((i) => i != song.id).toList(),
+                  readyIds: l.readyIds.where((i) => i != song.id).toList(),
+                  songOverrides: {...l.songOverrides}..remove(song.id),
+                );
+              }).toList(),
+            ));
+      } else {
+        // Desde biblioteca: borra la canción original y limpia setlists
+        widget.store.update((st) => AppState(
+              groups: st.groups,
+              songs: st.songs.where((x) => x.id != song.id).toList(),
+              setlists: st.setlists.map((l) => l.copyWith(songIds: l.songIds.where((i) => i != song.id).toList(), readyIds: l.readyIds.where((i) => i != song.id).toList())).toList(),
+            ));
+      }
       if (mounted) Navigator.of(context).pop();
     }
   }
@@ -106,7 +132,7 @@ class _SongScreenState extends State<SongScreen> {
     }
     final ids = _setlistSongIds(s);
     final swipe = ids.length > 1;
-    final displayed = swipe ? (s.songs.where((x) => x.id == _visibleSongId).firstOrNull ?? song) : song;
+    final displayed = swipe ? _resolveSong(s.songs.where((x) => x.id == _visibleSongId).firstOrNull ?? song, s) : _resolveSong(song, s);
 
     // El BPM del metrónomo se adapta a esta canción (si tiene BPM definido).
     _metro.syncWithSong(displayed);
@@ -147,7 +173,7 @@ class _SongScreenState extends State<SongScreen> {
         compactView: widget.store.compactView,
         onChanged: () => setState(() {}),
         onEdit: () async {
-          await Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongEditorPage(store: widget.store, song: displayed)));
+          await Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongEditorPage(store: widget.store, song: displayed, setlistId: widget.setlistId)));
           if (mounted) setState(() {});
         },
         onDelete: () => _delete(displayed),
@@ -163,7 +189,7 @@ class _SongScreenState extends State<SongScreen> {
                   itemBuilder: (context, i) {
                     final pageSong = s.songs.where((x) => x.id == ids[i]).firstOrNull;
                     if (pageSong == null) return const SizedBox.shrink();
-                    return _SongPage(song: pageSong, store: widget.store, config: config);
+                    return _SongPage(song: _resolveSong(pageSong, s), store: widget.store, config: config);
                   },
                 )
               : _SongPage(song: displayed, store: widget.store, config: config),
