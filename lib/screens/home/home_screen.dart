@@ -7,7 +7,6 @@ import '../../models/song.dart';
 import '../../theme.dart';
 import '../song/song_screen.dart';
 import '../setlists/setlist_songs_screen.dart';
-import 'library_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   final Store store;
@@ -45,13 +44,6 @@ class HomeScreen extends StatelessWidget {
               ]),
             ),
           ],
-          const SizedBox(height: 16),
-          ListTile(
-            leading: const Icon(Icons.library_music_outlined, color: AppColors.primary),
-            title: const Text('Ir a la biblioteca'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => LibraryScreen(store: store))),
-          ),
         ]);
       },
     );

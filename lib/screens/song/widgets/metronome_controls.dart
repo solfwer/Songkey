@@ -112,12 +112,20 @@ class MetronomeController extends ChangeNotifier {
   void setAccent(bool v) {
     settings.accent = v;
     store.setMetroAccent(v);
+    if (activo) {
+      metronome.restart();
+      _reprepareAndStart();
+    }
     notifyListeners();
   }
 
   void setSound(bool v) {
     settings.sound = v;
     store.setMetroSound(v);
+    if (activo) {
+      metronome.restart();
+      _reprepareAndStart();
+    }
     notifyListeners();
   }
 

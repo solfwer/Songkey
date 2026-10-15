@@ -188,7 +188,8 @@ Uint8List _buildBarWav({
   final msAcento = tipo == ClickSound.campana ? 300 : 60;
   final msNormal = tipo == ClickSound.campana ? 250 : 40;
 
-  final clickNormal = _clickWav(tipo, milliseconds: msNormal, volume: 0.7);
+  // Contraste de acento más marcado: normal 0.55, acento 1.0 (~5 dB diferencia)
+  final clickNormal = _clickWav(tipo, milliseconds: msNormal, volume: 0.55);
   final clickAcento = _clickWav(tipo, milliseconds: msAcento, volume: 1.0);
 
   // Extraer solo las muestras de audio (sin cabecera WAV)
@@ -399,7 +400,7 @@ class Metronome {
     var nextTime = DateTime.now().microsecondsSinceEpoch;
 
     void tick() {
-      if (_disposed || _timer == null) return;
+      if (_disposed) return;
 
       final now = DateTime.now().microsecondsSinceEpoch;
       final interval = micros;
