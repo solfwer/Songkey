@@ -12,6 +12,7 @@ import 'package:share_plus/share_plus.dart';
 import '../data/store.dart';
 import '../models/app_state.dart';
 import '../models/song.dart';
+import '../theme.dart';
 import 'share_utils.dart';
 
 /// Codifica grupos + canciones (sin setlists) en un JSON intercambiable.
@@ -22,6 +23,9 @@ String encodeLibrary(AppState state) => jsonEncode({
       'songs': state.songs.map((s) => s.toJson()).toList(),
     });
 
+/// Decisión del usuario para cada canción duplicada al importar.
+enum DuplicadoDecision { saltar, actualizar, reemplazar }
+
 /// Resultado de una importación, para informar al usuario.
 typedef ImportResult = ({
   List<Group> newGroups,
@@ -30,11 +34,15 @@ typedef ImportResult = ({
   int skipped,
   List<Song> duplicateSongs,
   List<Song> updatedSongs,
+  List<Song> replacedSongs,
 });
 
 /// Fusiona una biblioteca compartida en [current]: reutiliza grupos por nombre
 /// y maneja canciones existentes según las preferencias del usuario.
-ImportResult mergeLibrary(AppState current, String raw, {bool updateExisting = false, List<Song> songsToUpdate = const []}) {
+///
+/// [decisiones] es un mapa: título normalizado (lowercase) → [DuplicadoDecision].
+/// Si una duplicada no tiene decisión, se salta por defecto.
+ImportResult mergeLibrary(AppState current, String raw, {Map<String, DuplicadoDecision>? decisiones}) {
   final data = jsonDecode(raw) as Map<String, dynamic>;
   final songsJson = (data['songs'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
   final groupsJson = (data['groups'] as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
@@ -59,12 +67,13 @@ ImportResult mergeLibrary(AppState current, String raw, {bool updateExisting = f
     newGroups.add(Group(id: newId, name: imported.name, color: imported.color, members: imported.members, owner: imported.owner));
   }
 
-  // Canciones: detectar duplicados y manejar según preferencia.
+  // Canciones: detectar duplicados y manejar según la decisión del usuario.
   final existingTitles = {for (final s in current.songs) s.title.trim().toLowerCase()};
   final existingSongsMap = {for (final s in current.songs) s.title.trim().toLowerCase(): s};
   final usedIds = current.songs.map((s) => s.id).toSet();
   final newSongs = <Song>[];
   final updatedSongs = <Song>[];
+  final replacedSongs = <Song>[];
   var added = 0, skipped = 0;
   for (final j in songsJson) {
     final song = Song.fromJson(j);
@@ -75,43 +84,53 @@ ImportResult mergeLibrary(AppState current, String raw, {bool updateExisting = f
     }
     final lowerTitle = t.toLowerCase();
     if (existingTitles.contains(lowerTitle)) {
-      // Canción duplicada - decidir qué hacer
-      if (updateExisting) {
-        // Actualizar la canción existente
-        final existingSong = current.songs.firstWhere((s) => s.title.toLowerCase() == lowerTitle);
-        String? gid = song.groupId;
-        if (gid != null) gid = groupMap[gid];
-        final updatedSong = Song(
-          id: existingSongsMap[t.toLowerCase()]?.id ?? song.id,
-          title: t,
-          author: song.author,
-          key: song.key,
-          bpm: song.bpm,
-          groupId: gid,
-          body: song.body,
-          style: song.style,
-          durationSec: song.durationSec,
-          lastOpenedAt: null,
-          structure: song.structure,
-        );
-        updatedSongs.add(Song(
-          id: existingSongsMap[t.toLowerCase()]!.id,
-          title: t,
-          author: song.author,
-          key: song.key,
-          bpm: song.bpm,
-          groupId: gid,
-          body: song.body,
-          style: song.style,
-          durationSec: song.durationSec,
-          lastOpenedAt: null,
-          structure: song.structure,
-        ));
-      } else {
-        // Saltar canción duplicada
-        skipped++;
-        continue;
+      // Canción duplicada - decidir según el mapa de decisiones
+      final decision = decisiones?[lowerTitle] ?? DuplicadoDecision.saltar;
+      switch (decision) {
+        case DuplicadoDecision.saltar:
+          skipped++;
+          continue;
+        case DuplicadoDecision.actualizar:
+          // Conservar el id existente (referencias de setlists intactas)
+          final existingSong = current.songs.firstWhere((s) => s.title.toLowerCase() == lowerTitle);
+          String? gid = song.groupId;
+          if (gid != null) gid = groupMap[gid];
+          final updatedSong = Song(
+            id: existingSong.id,
+            title: t,
+            author: song.author,
+            key: song.key,
+            bpm: song.bpm,
+            groupId: gid,
+            body: song.body,
+            style: song.style,
+            durationSec: song.durationSec,
+            lastOpenedAt: null,
+            structure: song.structure,
+          );
+          updatedSongs.add(updatedSong);
+          break;
+        case DuplicadoDecision.reemplazar:
+          // Borrar la existente e insertar la importada tal cual
+          String? gid = song.groupId;
+          if (gid != null) gid = groupMap[gid];
+          final replacedSong = Song(
+            id: song.id.isEmpty || song.id.startsWith('temp_') || usedIds.contains(song.id) ? uid() : song.id,
+            title: t,
+            author: song.author,
+            key: song.key,
+            bpm: song.bpm,
+            groupId: gid,
+            body: song.body,
+            style: song.style,
+            durationSec: song.durationSec,
+            lastOpenedAt: null,
+            structure: song.structure,
+          );
+          replacedSongs.add(replacedSong);
+          break;
       }
+      continue;
     }
     var id = song.id;
     if (id.isEmpty || id.startsWith('temp_') || usedIds.contains(id)) id = uid();
@@ -133,7 +152,7 @@ ImportResult mergeLibrary(AppState current, String raw, {bool updateExisting = f
     ));
     added++;
   }
-  return (newGroups: newGroups, newSongs: newSongs, added: added, skipped: skipped, duplicateSongs: [], updatedSongs: updatedSongs);
+  return (newGroups: newGroups, newSongs: newSongs, added: added, skipped: skipped, duplicateSongs: [], updatedSongs: updatedSongs, replacedSongs: replacedSongs);
 }
 
 /// Comparte la biblioteca o la guarda en el dispositivo (a eleccion del usuario).
@@ -211,30 +230,32 @@ Future<void> importLibrary(BuildContext context, Store store) async {
   await _showImportPreviewDialog(context, store, raw);
 }
 
-/// Muestra un diálogo de vista previa con opciones de importación
-Future<void> _showImportPreviewDialog(BuildContext context, Store store, String raw) async {
+/// Muestra un diálogo de vista previa con opciones de importación.
+/// Devuelve un mapa: título normalizado → [DuplicadoDecision].
+Future<Map<String, DuplicadoDecision>?> _showImportPreviewDialog(BuildContext context, Store store, String raw) async {
   // Parsear para vista previa
   final data = jsonDecode(raw) as Map<String, dynamic>;
   final songsJson = (data['songs'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
   final groupsJson = (data['groups'] as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
 
-  // Analizar duplicados
   final storeState = store.state;
   final existingTitles = {for (final s in storeState.songs) s.title.trim().toLowerCase()};
+  final existingSongsMap = {for (final s in storeState.songs) s.title.trim().toLowerCase(): s};
   final existingGroupsByName = {for (final g in storeState.groups) g.name.trim().toLowerCase()};
 
-  int newSongsCount = 0;
-  int duplicateSongsCount = 0;
+  final newSongs = <Song>[];
+  final duplicateSongs = <Song>[];
   int newGroupsCount = 0;
 
   for (final j in songsJson) {
     final song = Song.fromJson(j);
     final t = song.title.trim();
+    if (t.isEmpty) continue;
     final lowerTitle = t.toLowerCase();
     if (existingTitles.contains(lowerTitle)) {
-      duplicateSongsCount++;
+      duplicateSongs.add(song);
     } else {
-      newSongsCount++;
+      newSongs.add(song);
     }
   }
 
@@ -246,36 +267,54 @@ Future<void> _showImportPreviewDialog(BuildContext context, Store store, String 
     }
   }
 
-  if (!context.mounted) return;
+  if (!context.mounted) return null;
 
   final messenger = ScaffoldMessenger.of(context);
 
-  // Mostrar diálogo de confirmación con vista previa
-  final updateExisting = await showDialog<bool>(
+  // Mostrar diálogo de confirmación con vista previa por canción
+  final decisiones = await showDialog<Map<String, DuplicadoDecision>>(
     context: context,
     builder: (context) => _ImportPreviewDialog(
-      newSongsCount: newSongsCount,
-      duplicateSongsCount: duplicateSongsCount,
+      newSongs: newSongs,
+      duplicateSongs: duplicateSongs,
+      existingSongsMap: existingSongsMap,
       newGroupsCount: newGroupsCount,
     ),
   );
 
-  if (updateExisting == null) return; // Usuario canceló
+  if (decisiones == null) return null; // Usuario canceló
 
-  // Importar con las opciones elegidas
+  // Importar con las decisiones elegidas
   try {
-    final res = mergeLibrary(store.state, raw, updateExisting: updateExisting);
-    store.update((s) => AppState(
-      groups: [...s.groups, ...res.newGroups],
-      songs: [...res.newSongs, ...s.songs],
-      setlists: s.setlists,
-    ));
-    final msg = res.added == 0 && res.skipped == 0
+    final res = mergeLibrary(store.state, raw, decisiones: decisiones);
+    store.update((s) {
+      final canciones = <Song>[...s.songs];
+      // Aplicar canciones actualizadas (conservan su id y referencias de setlists)
+      for (final u in res.updatedSongs) {
+        final idx = canciones.indexWhere((x) => x.id == u.id);
+        if (idx >= 0) canciones[idx] = u;
+      }
+      // Aplicar canciones reemplazadas (borran la existente e insertan la importada)
+      for (final r in res.replacedSongs) {
+        final idx = canciones.indexWhere((x) => x.title.toLowerCase() == r.title.toLowerCase());
+        if (idx >= 0) canciones[idx] = r;
+        else canciones.add(r);
+      }
+      return AppState(
+        groups: [...s.groups, ...res.newGroups],
+        songs: [...res.newSongs, ...canciones],
+        setlists: s.setlists,
+      );
+    });
+    final partes = <String>[];
+    if (res.added > 0) partes.add('${res.added} nueva${res.added == 1 ? '' : 's'}');
+    if (res.updatedSongs.isNotEmpty) partes.add('${res.updatedSongs.length} actualizada${res.updatedSongs.length == 1 ? '' : 's'}');
+    if (res.replacedSongs.isNotEmpty) partes.add('${res.replacedSongs.length} reemplazada${res.replacedSongs.length == 1 ? '' : 's'}');
+    if (res.skipped > 0) partes.add('${res.skipped} saltada${res.skipped == 1 ? '' : 's'}');
+    if (newGroupsCount > 0) partes.add('${newGroupsCount} grupo${newGroupsCount == 1 ? '' : 's'}');
+    final msg = partes.isEmpty
         ? 'No había canciones nuevas en el archivo.'
-        : 'Importadas ${res.added} canción${res.added == 1 ? '' : 'es'}'
-            '${res.skipped > 0 ? ', ${res.skipped} repetida${res.skipped == 1 ? '' : 's'} omitida${res.skipped == 1 ? '' : 's'}' : ''}'
-            '${res.updatedSongs.isNotEmpty ? ', ${res.updatedSongs.length} canción${res.updatedSongs.length == 1 ? '' : 'es'} actualizada${res.updatedSongs.length == 1 ? '' : 's'}' : ''}'
-            '${res.newGroups.isNotEmpty ? ', ${res.newGroups.length} grupo${res.newGroups.length == 1 ? '' : 's'} nuevo${res.newGroups.length == 1 ? '' : 's'}' : ''}.';
+        : 'Importado: ${partes.join(', ')}.';
     if (context.mounted) {
       messenger.showSnackBar(SnackBar(content: Text(msg)));
     }
@@ -284,51 +323,208 @@ Future<void> _showImportPreviewDialog(BuildContext context, Store store, String 
       messenger.showSnackBar(SnackBar(content: Text('No se pudo importar la biblioteca: $e')));
     }
   }
+  return null;
 }
 
-/// Diálogo de vista previa de importación
-class _ImportPreviewDialog extends StatelessWidget {
-  final int newSongsCount;
-  final int duplicateSongsCount;
+/// Diálogo de vista previa de importación con decisión por canción duplicada.
+class _ImportPreviewDialog extends StatefulWidget {
+  final List<Song> newSongs;
+  final List<Song> duplicateSongs;
+  final Map<String, Song> existingSongsMap;
   final int newGroupsCount;
 
   const _ImportPreviewDialog({
-    required this.newSongsCount,
-    required this.duplicateSongsCount,
+    required this.newSongs,
+    required this.duplicateSongs,
+    required this.existingSongsMap,
     required this.newGroupsCount,
   });
 
   @override
+  State<_ImportPreviewDialog> createState() => _ImportPreviewDialogState();
+}
+
+class _ImportPreviewDialogState extends State<_ImportPreviewDialog> {
+  // Decisión por canción duplicada (clave = título lowercase).
+  final Map<String, DuplicadoDecision> _decisiones = {};
+
+  DuplicadoDecision _decisionFor(String title) => _decisiones[title.toLowerCase()] ?? DuplicadoDecision.saltar;
+
+  void _setAll(DuplicadoDecision decision) {
+    setState(() {
+      for (final s in widget.duplicateSongs) {
+        _decisiones[s.title.trim().toLowerCase()] = decision;
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final tieneDuplicados = widget.duplicateSongs.isNotEmpty;
+
     return AlertDialog(
       title: const Text('Vista previa de importación'),
-      content: SingleChildScrollView(
+      content: SizedBox(
+        width: double.maxFinite,
+        height: 520,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Se importarán $newSongsCount canción${newSongsCount == 1 ? '' : 'es'} nueva${newSongsCount == 1 ? '' : 's'}.'),
-            if (duplicateSongsCount > 0)
-              Text('Se detectaron $duplicateSongsCount canción${duplicateSongsCount == 1 ? '' : 's'} ya existente${duplicateSongsCount == 1 ? '' : 's'}.'),
-            if (newGroupsCount > 0)
-              Text('Se añadirán $newGroupsCount grupo${newGroupsCount == 1 ? '' : 's'} nuevo${newGroupsCount == 1 ? '' : 's'}.'),
+            // Resumen
+            Text('Se importarán ${widget.newSongs.length} canción${widget.newSongs.length == 1 ? '' : 'es'} nueva${widget.newSongs.length == 1 ? '' : 's'}.', style: const TextStyle(fontWeight: FontWeight.w600)),
+            if (tieneDuplicados)
+              Text('Se detectaron ${widget.duplicateSongs.length} canción${widget.duplicateSongs.length == 1 ? '' : 's'} ya existente${widget.duplicateSongs.length == 1 ? '' : 's'}.', style: const TextStyle(color: Colors.orange)),
+            if (widget.newGroupsCount > 0)
+              Text('Se añadirán ${widget.newGroupsCount} grupo${widget.newGroupsCount == 1 ? '' : 's'} nuevo${widget.newGroupsCount == 1 ? '' : 's'}.'),
             const SizedBox(height: 16),
-            const Text('¿Qué hacer con las canciones duplicadas?'),
-            const SizedBox(height: 8),
-            const Text('Las canciones con el mismo título ya existen en tu biblioteca.', style: TextStyle(fontSize: 12, color: Colors.grey)),
+
+            // Botones globales para duplicados
+            if (tieneDuplicados) ...[
+              const Text('¿Qué hacer con las canciones duplicadas?', style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => _setAll(DuplicadoDecision.saltar),
+                      child: const Text('Saltar todas'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => _setAll(DuplicadoDecision.actualizar),
+                      child: const Text('Actualizar todas'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => _setAll(DuplicadoDecision.reemplazar),
+                      style: OutlinedButton.styleFrom(foregroundColor: AppColors.destructive),
+                      child: const Text('Reemplazar todas'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Lista de duplicadas con decisión individual
+            if (tieneDuplicados) ...[
+              const Text('Canciones duplicadas:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+              const SizedBox(height: 8),
+              Expanded(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: widget.duplicateSongs.length,
+                  itemBuilder: (context, i) {
+                    final song = widget.duplicateSongs[i];
+                    final key = song.title.trim().toLowerCase();
+                    final decision = _decisionFor(song.title);
+                    final existente = widget.existingSongsMap[key];
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        title: Text(song.title, style: const TextStyle(fontWeight: FontWeight.w600)),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (existente != null)
+                              Text('En tu biblioteca: tono ${existente.key}${existente.bpm != null ? ' · ${existente.bpm} BPM' : ''}'),
+                            Text('Importada: tono ${song.key}${song.bpm != null ? ' · ${song.bpm} BPM' : ''}'),
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                _DecisionChip(
+                                  decision: DuplicadoDecision.saltar,
+                                  actual: decision,
+                                  label: 'Saltar',
+                                  onTap: () => setState(() => _decisiones[key] = DuplicadoDecision.saltar),
+                                ),
+                                const SizedBox(width: 6),
+                                _DecisionChip(
+                                  decision: DuplicadoDecision.actualizar,
+                                  actual: decision,
+                                  label: 'Actualizar',
+                                  onTap: () => setState(() => _decisiones[key] = DuplicadoDecision.actualizar),
+                                ),
+                                const SizedBox(width: 6),
+                                _DecisionChip(
+                                  decision: DuplicadoDecision.reemplazar,
+                                  actual: decision,
+                                  label: 'Reemplazar',
+                                  onTap: () => setState(() => _decisiones[key] = DuplicadoDecision.reemplazar),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ],
         ),
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context, false), // Saltar duplicados
-          child: const Text('Saltar duplicados'),
+          onPressed: () => Navigator.pop(context, null),
+          child: const Text('Cancelar'),
         ),
         FilledButton(
-          onPressed: () => Navigator.pop(context, true), // Actualizar duplicados
-          child: const Text('Actualizar duplicados'),
+          onPressed: () => Navigator.pop(context, _decisiones),
+          child: const Text('Importar'),
         ),
       ],
     );
+  }
+}
+
+/// Chip de decisión individual para una canción duplicada.
+class _DecisionChip extends StatelessWidget {
+  final DuplicadoDecision decision;
+  final DuplicadoDecision actual;
+  final String label;
+  final VoidCallback onTap;
+
+  const _DecisionChip({
+    required this.decision,
+    required this.actual,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final seleccionado = actual == decision;
+    return FilterChip(
+      label: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: seleccionado ? Colors.white : null)),
+      selected: seleccionado,
+      onSelected: (_) => onTap(),
+      backgroundColor: Colors.grey.withValues(alpha: 0.15),
+      selectedColor: _color(decision),
+      checkmarkColor: Colors.white,
+      showCheckmark: false,
+      side: BorderSide.none,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      padding: EdgeInsets.zero,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+  }
+
+  Color _color(DuplicadoDecision d) {
+    switch (d) {
+      case DuplicadoDecision.saltar:
+        return Colors.grey;
+      case DuplicadoDecision.actualizar:
+        return AppColors.primary;
+      case DuplicadoDecision.reemplazar:
+        return AppColors.destructive;
+    }
   }
 }

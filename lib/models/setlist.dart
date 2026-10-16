@@ -25,6 +25,7 @@ class SongOverride {
   String? style;
   int? durationSec;
   List<String>? structure;
+  String? timeSignature;
 
   SongOverride({
     required this.songId,
@@ -36,6 +37,7 @@ class SongOverride {
     this.style,
     this.durationSec,
     this.structure,
+    this.timeSignature,
   });
 
   Map<String, dynamic> toJson() => {
@@ -48,6 +50,7 @@ class SongOverride {
         'style': style,
         'durationSec': durationSec,
         'structure': structure,
+        'timeSignature': timeSignature,
       };
 
   factory SongOverride.fromJson(Map<String, dynamic> j) => SongOverride(
@@ -60,6 +63,7 @@ class SongOverride {
         style: j['style'] as String?,
         durationSec: j['durationSec'] as int?,
         structure: (j['structure'] as List?)?.map((e) => e.toString()).toList(),
+        timeSignature: j['timeSignature'],
       );
 
   /// Convierte el override en una Song completa (para uso en pantalla).
@@ -74,6 +78,7 @@ class SongOverride {
         style: style,
         durationSec: durationSec,
         structure: structure,
+        timeSignature: timeSignature,
       );
 }
 

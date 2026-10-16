@@ -29,6 +29,17 @@ class Song {
   /// tal como está escrito (comportamiento anterior).
   List<String>? structure;
 
+  /// Compás (ej. "4/4", "3/4", "6/8").
+  String? timeSignature;
+
+  /// Por cada campo de metadatos, de dónde viene su valor:
+  /// 'acordes' (detectado offline), 'api' (GetSongBPM/MusicBrainz), 'tap' (tap tempo), 'manual'.
+  /// Claves: 'author', 'key', 'bpm', 'timeSignature'.
+  Map<String, String>? metadataSource;
+
+  /// Fecha de la última consulta online de metadatos (ISO-8601).
+  String? metadataFetchedAt;
+
   Song({
     required this.id,
     required this.title,
@@ -41,6 +52,9 @@ class Song {
     this.durationSec,
     this.lastOpenedAt,
     this.structure,
+    this.timeSignature,
+    this.metadataSource,
+    this.metadataFetchedAt,
   });
 
   Map<String, dynamic> toJson() => {
@@ -55,6 +69,9 @@ class Song {
         'durationSec': durationSec,
         'lastOpenedAt': lastOpenedAt,
         'structure': structure,
+        'timeSignature': timeSignature,
+        'metadataSource': metadataSource,
+        'metadataFetchedAt': metadataFetchedAt,
       };
 
   factory Song.fromJson(Map<String, dynamic> j) => Song(
@@ -69,6 +86,10 @@ class Song {
         durationSec: j['durationSec'],
         lastOpenedAt: j['lastOpenedAt'],
         structure: (j['structure'] as List?)?.map((e) => e.toString()).toList(),
+        timeSignature: j['timeSignature'],
+        metadataSource: (j['metadataSource'] as Map<String, dynamic>?)
+            ?.map((k, v) => MapEntry(k, v.toString())),
+        metadataFetchedAt: j['metadataFetchedAt'],
       );
 
   /// Copia de la canción cambiando solo lo indicado (mantiene id y resto).
@@ -83,6 +104,9 @@ class Song {
     int? durationSec,
     String? lastOpenedAt,
     List<String>? structure,
+    String? timeSignature,
+    Map<String, String>? metadataSource,
+    String? metadataFetchedAt,
   }) =>
       Song(
         id: id,
@@ -96,5 +120,8 @@ class Song {
         durationSec: durationSec ?? this.durationSec,
         lastOpenedAt: lastOpenedAt ?? this.lastOpenedAt,
         structure: structure ?? this.structure,
+        timeSignature: timeSignature ?? this.timeSignature,
+        metadataSource: metadataSource ?? this.metadataSource,
+        metadataFetchedAt: metadataFetchedAt ?? this.metadataFetchedAt,
       );
 }

@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import '../../data/chord_parser.dart';
 import '../../data/store.dart';
 import '../../models/app_state.dart';
+import '../../models/setlist.dart';
 import '../../models/song.dart';
 import '../../theme.dart';
 import 'song_editor_page.dart';
@@ -94,6 +95,36 @@ class _SongScreenState extends State<SongScreen> {
     widget.store.markSongOpened(ids[p]);
   }
 
+  /// Guarda el tono de una canción en el override del setlist (no modifica la original).
+  void _guardarTonoEnSetlist(String songId, String nuevoKey) {
+    final s = widget.store.state;
+    final list = s.setlists.where((l) => l.id == widget.setlistId).firstOrNull;
+    if (list == null) return;
+    final original = s.songs.where((x) => x.id == songId).firstOrNull;
+    if (original == null) return;
+    final override = list.getOverride(songId);
+    final nuevoOverride = SongOverride(
+      songId: songId,
+      title: override?.title ?? original.title,
+      author: override?.author ?? original.author,
+      key: nuevoKey,
+      bpm: override?.bpm ?? original.bpm,
+      body: override?.body ?? original.body,
+      style: override?.style ?? original.style,
+      durationSec: override?.durationSec ?? original.durationSec,
+      structure: override?.structure ?? original.structure,
+      timeSignature: override?.timeSignature ?? original.timeSignature,
+    );
+    widget.store.update((st) => AppState(
+          groups: st.groups,
+          songs: st.songs,
+          setlists: st.setlists.map((l) {
+            if (l.id != widget.setlistId) return l;
+            return l.withOverride(songId, nuevoOverride);
+          }).toList(),
+        ));
+  }
+
   Future<void> _delete(Song song) async {
     final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(title: Text('¿Eliminar "${song.title}"?'), actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Eliminar'))]));
     if (ok == true) {
@@ -149,9 +180,18 @@ class _SongScreenState extends State<SongScreen> {
         title: Text(displayed.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17)),
         actions: [
           _KeySelector(
-            currentKey: sharpen(transposeChord(displayed.key, config.shiftFor(displayed.id))),
+            currentKey: widget.setlistId != null
+                ? displayed.key
+                : sharpen(transposeChord(displayed.key, config.shiftFor(displayed.id))),
             american: config.americanNotation,
-            onSelected: (k) => setState(() => config.setShift(displayed.id, semitoneShift(displayed.key, k))),
+            onSelected: (k) {
+              if (widget.setlistId != null) {
+                // Guardar el tono en el override del setlist (no toca la original)
+                _guardarTonoEnSetlist(displayed.id, k);
+              } else {
+                setState(() => config.setShift(displayed.id, semitoneShift(displayed.key, k)));
+              }
+            },
           ),
           // Botón pausa/reanudar del desplazamiento automático (solo visible si está habilitado en opciones).
           if (config.autoScroll)

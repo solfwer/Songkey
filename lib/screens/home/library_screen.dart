@@ -13,11 +13,12 @@ import '../../models/app_state.dart';
 import '../../models/song.dart';
 import '../../services/pdf_import.dart';
 import '../../theme.dart';
+import '../../widgets/combo_button.dart';
 import '../song/song_editor_page.dart';
 import '../song/song_screen.dart';
 
 /// Formas de añadir una canción desde el menú "+".
-enum _AddOption { manual, pdf, chordpro }
+enum _AddOption { manual, pdf, chordpro, variosChordpro }
 
 class LibraryScreen extends StatefulWidget {
   final Store store;
@@ -32,13 +33,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   List<Song> _applyFilters(List<Song> all) {
     final f = q.trim().toLowerCase();
-    if (f.isEmpty) return all;
-    return all.where((x) {
+    var list = all.where((x) {
       final title = x.title.toLowerCase();
       final author = (x.author ?? '').toLowerCase();
       final body = x.body.toLowerCase();
       return title.contains(f) || author.contains(f) || body.contains(f);
     }).toList();
+    // Orden alfabético por título (A→Z, sin distinguir mayúsculas).
+    list.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    return list;
   }
 
   void _handleAdd(_AddOption opt) {
@@ -49,6 +52,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
         _importPdf();
       case _AddOption.chordpro:
         _importChordPro();
+      case _AddOption.variosChordpro:
+        _importVariosChordpro();
     }
   }
 
@@ -140,6 +145,177 @@ class _LibraryScreenState extends State<LibraryScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Se añadieron ${selected.length} canciones')));
   }
 
+  /// Importa varios documentos ChordPro a la vez (varios archivos).
+  Future<void> _importVariosChordpro() async {
+    final res = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['cho', 'chopro', 'chordpro', 'txt'],
+      withData: true,
+      allowMultiple: true,
+    );
+    final files = res?.files;
+    if (files == null || files.isEmpty) return;
+
+    final parser = ChordProParser();
+    final existingTitles = widget.store.state.songs.map((s) => s.title.trim().toLowerCase()).toSet();
+    final seenTitles = <String>{};
+    final parsedSongs = <_ParsedSong>[];
+
+    for (final file in files) {
+      final bytes = file.bytes;
+      if (bytes == null) continue;
+      final text = utf8.decode(bytes);
+      final fileName = file.name.replaceAll(RegExp(r'\.[^.]+$'), '');
+      final songTexts = splitChordProSongs(text);
+      for (var i = 0; i < songTexts.length; i++) {
+        final st = songTexts[i];
+        parser.issues.clear();
+        final song = parser.parse(st);
+        String title = song.meta.title ?? '';
+        if (title.isEmpty) title = '$fileName (${i + 1})';
+        final author = song.meta.artist;
+        final key = song.meta.key ?? 'C';
+        final bpm = int.tryParse(song.meta.tempo ?? '');
+        final isDuplicateInFile = seenTitles.contains(title.trim().toLowerCase());
+        final isDuplicateInLibrary = existingTitles.contains(title.trim().toLowerCase());
+        seenTitles.add(title.trim().toLowerCase());
+        parsedSongs.add(_ParsedSong(
+          title: title,
+          author: author,
+          key: key,
+          bpm: bpm,
+          body: st,
+          isDuplicate: isDuplicateInFile || isDuplicateInLibrary,
+          duplicateReason: isDuplicateInFile ? 'Repetida en el archivo' : (isDuplicateInLibrary ? 'Ya en la biblioteca' : null),
+        ));
+      }
+    }
+
+    if (!mounted) return;
+    final selected = await showDialog<List<_ParsedSong>>(
+      context: context,
+      builder: (_) => _MultiSongImportDialog(parsedSongs: parsedSongs),
+    );
+
+    if (selected == null || selected.isEmpty) return;
+
+    widget.store.update((state) {
+      final canciones = [...state.songs, ...selected.map((p) => Song(
+        id: uid(),
+        title: p.title,
+        author: p.author,
+        key: p.key,
+        bpm: p.bpm,
+        body: p.body,
+      ))];
+      return AppState(groups: state.groups, songs: canciones, setlists: state.setlists);
+    });
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Se añadieron ${selected.length} canciones')));
+  }
+
+  /// Renombra una canción (sólo cambia el título).
+  Future<void> _renombrarCancion(Song song) async {
+    final controller = TextEditingController(text: song.title);
+    final resultado = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Renombrar canción'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Nuevo título'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Renombrar'),
+          ),
+        ],
+      ),
+    );
+    if (resultado == null || resultado.isEmpty) return;
+    widget.store.update((s) {
+      final canciones = s.songs.map((x) => x.id == song.id ? x.copyWith(title: resultado) : x).toList();
+      return AppState(groups: s.groups, songs: canciones, setlists: s.setlists);
+    });
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Canción renombrada')));
+  }
+
+  /// Abre el editor de una canción existente.
+  void _editarCancion(Song song) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongEditorPage(store: widget.store, song: song)));
+  }
+
+  /// Elimina una canción de la biblioteca (y de los setlists que la contienen).
+  Future<void> _eliminarCancion(Song song) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('¿Eliminar "${song.title}"?'),
+        content: const Text('Se quitará de la biblioteca y de los setlists donde aparezca.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Eliminar'),
+            style: FilledButton.styleFrom(foregroundColor: AppColors.destructive),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    widget.store.update((st) => AppState(
+          groups: st.groups,
+          songs: st.songs.where((x) => x.id != song.id).toList(),
+          setlists: st.setlists.map((l) => l.copyWith(
+                songIds: l.songIds.where((i) => i != song.id).toList(),
+                readyIds: l.readyIds.where((i) => i != song.id).toList(),
+              )).toList(),
+        ));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Canción eliminada')));
+  }
+
+  /// Muestra un bottom sheet con las acciones disponibles para una canción.
+  Future<void> _mostrarMenuCancion(BuildContext context, Song song) async {
+    await showModalBottomSheet(
+      context: context,
+      builder: (ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.edit, size: 20),
+            title: const Text('Renombrar'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _renombrarCancion(song);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.open_in_new, size: 20),
+            title: const Text('Editar'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _editarCancion(song);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete, size: 20, color: AppColors.destructive),
+            title: const Text('Eliminar', style: TextStyle(color: AppColors.destructive)),
+            onTap: () {
+              Navigator.pop(ctx);
+              _eliminarCancion(song);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -158,14 +334,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              PopupMenuButton<_AddOption>(
+              ComboButton<_AddOption>(
+                label: 'Añadir',
+                icon: Icons.add,
                 tooltip: 'Añadir canción',
-                onSelected: _handleAdd,
-                itemBuilder: (_) => [
-                  const PopupMenuItem(
-                    value: _AddOption.manual,
-                    child: ListTile(leading: Icon(Icons.edit), title: Text('Escribir a mano (ChordPro)'), contentPadding: EdgeInsets.zero, dense: true),
-                  ),
+                onPressed: () => _handleAdd(_AddOption.manual),
+                menuItems: [
                   const PopupMenuItem(
                     value: _AddOption.pdf,
                     child: ListTile(leading: Icon(Icons.picture_as_pdf), title: Text('Importar PDF'), contentPadding: EdgeInsets.zero, dense: true),
@@ -174,16 +348,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     value: _AddOption.chordpro,
                     child: ListTile(leading: Icon(Icons.description), title: Text('Importar documento ChordPro'), contentPadding: EdgeInsets.zero, dense: true),
                   ),
-                ],
-                child: Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(12)),
-                    child: const Icon(Icons.add, color: Colors.white, size: 26),
+                  const PopupMenuItem(
+                    value: _AddOption.variosChordpro,
+                    child: ListTile(leading: Icon(Icons.description_outlined), title: Text('Importar varios documentos ChordPro'), contentPadding: EdgeInsets.zero, dense: true),
                   ),
-                ),
+                ],
+                onSelected: _handleAdd,
               ),
             ]),
             const SizedBox(height: 8),
@@ -244,6 +414,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             overflow: TextOverflow.ellipsis,
                           ),
                           onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongScreen(store: widget.store, songId: song.id))),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.more_vert, size: 20, color: Colors.grey),
+                            tooltip: 'Acciones de la canción',
+                            onPressed: () => _mostrarMenuCancion(context, song),
+                          ),
                         );
                       },
                     ),

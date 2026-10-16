@@ -12,6 +12,11 @@ import '../../data/store.dart';
 import '../../models/app_state.dart';
 import '../../models/setlist.dart';
 import '../../models/song.dart';
+import '../../models/song_metadata_suggestion.dart';
+import '../../services/metadata/chord_key_detector.dart';
+import '../../services/metadata/getsongbpm_client.dart';
+import '../../services/metadata/musicbrainz_client.dart';
+import '../../services/metadata/song_metadata_service.dart';
 import 'widgets/pdf_import_button.dart';
 import 'song_editor_tabs.dart';
 import 'structure_tab.dart';
@@ -40,9 +45,16 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
   late final TextEditingController style;
   late final TextEditingController duration;
   late final TextEditingController body;
+  late final TextEditingController timeSignature;
   String? groupId;
   List<String>? _structure;
   late TabController _tabCtrl;
+
+  /// Servicio de metadatos (detección offline + APIs online).
+  late final SongMetadataService _metaService;
+
+  /// Estado de carga para el autocompletar.
+  bool _metaLoading = false;
 
   /// true mientras el cambio de texto viene del editor visual: as no se
   /// reconstruye el editor con su propio resultado.
@@ -66,6 +78,66 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
     fill(author, meta.artist);
     fill(key, meta.key);
     fill(bpm, meta.tempo);
+    fill(timeSignature, meta.time);
+  }
+
+  /// Autocompleta metadatos (tono, BPM, autor, compás) desde acordes y APIs online.
+  /// Nunca sobrescribe campos que el usuario ya haya llenado.
+  Future<void> _autoCompletar() async {
+    final t = title.text.trim();
+    if (t.isEmpty) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Escribe un título primero')));
+      return;
+    }
+    setState(() => _metaLoading = true);
+    try {
+      final existente = {
+        'key': key.text.trim().isEmpty ? null : key.text.trim(),
+        'author': author.text.trim().isEmpty ? null : author.text.trim(),
+        'bpm': bpm.text.trim().isEmpty ? null : bpm.text.trim(),
+        'timeSignature': timeSignature.text.trim().isEmpty ? null : timeSignature.text.trim(),
+      };
+      final sugerencia = await _metaService.sugerir(
+        titulo: t,
+        chordProText: body.text.isNotEmpty ? body.text : null,
+        existing: existente,
+        consultarOnline: true,
+      );
+
+      // Aplicar solo campos vacíos (nunca sobrescribir).
+      setState(() {
+        if (sugerencia.key != null && key.text.trim().isEmpty) {
+          key.text = sugerencia.key!.value;
+        }
+        if (sugerencia.bpm != null && bpm.text.trim().isEmpty) {
+          bpm.text = sugerencia.bpm!.value.toString();
+        }
+        if (sugerencia.artist != null && author.text.trim().isEmpty) {
+          author.text = sugerencia.artist!.value;
+        }
+        if (sugerencia.timeSignature != null && timeSignature.text.trim().isEmpty) {
+          timeSignature.text = sugerencia.timeSignature!.value;
+        }
+      });
+
+      if (mounted) {
+        final partes = <String>[];
+        if (sugerencia.key != null) partes.add('tono: ${sugerencia.key!.value}');
+        if (sugerencia.bpm != null) partes.add('BPM: ${sugerencia.bpm!.value}');
+        if (sugerencia.artist != null) partes.add('autor: ${sugerencia.artist!.value}');
+        if (sugerencia.timeSignature != null) partes.add('compás: ${sugerencia.timeSignature!.value}');
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(partes.isEmpty ? 'No se encontraron metadatos' : 'Sugerido: ${partes.join(', ')}'),
+          duration: const Duration(seconds: 4),
+        ));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se pudo autocompletar')));
+      }
+    } finally {
+      if (mounted) setState(() => _metaLoading = false);
+    }
   }
 
   @override
@@ -78,6 +150,13 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
     style = TextEditingController(text: widget.song?.style ?? '');
     duration = TextEditingController(text: _durationLabel(widget.song?.durationSec));
     body = TextEditingController(text: widget.song?.body ?? widget.initialBody ?? '');
+    timeSignature = TextEditingController(text: widget.song?.timeSignature ?? '');
+    // Servicio de metadatos: GetSongBPM key via --dart-define (vacío = sin API online).
+    final gsbKey = String.fromEnvironment('GETSONGBPM_KEY');
+    _metaService = SongMetadataService(
+      getsongbpm: GetSongBpmClient(apiKey: gsbKey),
+      musicbrainz: MusicBrainzClient(),
+    );
     // Canciones antiguas sin author/bpm guardados: se sacan de las directivas.
     if (widget.song != null) _syncMetaFromBody();
     _bodyInicial = body.text;
@@ -96,7 +175,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
   void dispose() {
     _tabCtrl.dispose();
     body.removeListener(_onBodyTextChanged);
-    for (final c in [title, key, bpm, author, style, duration, body]) {
+    for (final c in [title, key, bpm, author, style, duration, body, timeSignature]) {
       c.dispose();
     }
     super.dispose();
@@ -162,7 +241,24 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
           SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              TextField(controller: title, decoration: const InputDecoration(labelText: 'Título')),
+              Row(children: [
+                Expanded(
+                  child: TextField(controller: title, decoration: const InputDecoration(labelText: 'Título')),
+                ),
+                const SizedBox(width: 6),
+                if (!_metaLoading)
+                  OutlinedButton(
+                    onPressed: _autoCompletar,
+                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
+                    child: const Text('Auto', style: TextStyle(fontSize: 12)),
+                  )
+                else
+                  const SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+              ]),
               const SizedBox(height: 12),
               TextField(controller: author, decoration: const InputDecoration(labelText: 'Autor (opcional)')),
               const SizedBox(height: 12),
@@ -170,6 +266,8 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
                 Expanded(child: TextField(controller: key, decoration: const InputDecoration(labelText: 'Tono'))),
                 const SizedBox(width: 12),
                 Expanded(child: TextField(controller: bpm, decoration: InputDecoration(labelText: 'BPM', suffixIcon: _TapTempoIcon(controller: bpm)), keyboardType: TextInputType.number)),
+                const SizedBox(width: 12),
+                Expanded(child: TextField(controller: timeSignature, decoration: const InputDecoration(labelText: 'Compás (ej. 4/4)'))),
                 const SizedBox(width: 12),
                 Expanded(child: DropdownButtonFormField<String?>(initialValue: groupId, isExpanded: true, decoration: const InputDecoration(labelText: 'Grupo'), items: [null, ...groups.map((g) => g.id)].map((id) => DropdownMenuItem(value: id, child: Text(id == null ? 'Sin grupo' : groups.firstWhere((g) => g.id == id).name, overflow: TextOverflow.ellipsis))).toList(), onChanged: (v) => setState(() => groupId = v))),
               ]),
@@ -249,6 +347,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
     required String autor,
     required String tono,
     required String tempo,
+    String? timeSignature,
   }) {
     final meta = RegExp(r'^\s*\{\s*(title|t|subtitle|st|artist|author|composer|key|k|tempo|bpm|time|capo)\s*[:=].*\}\s*$', caseSensitive: false);
     final lineas = cuerpo.replaceAll('\r', '').split('\n');
@@ -265,6 +364,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
       if (autor.isNotEmpty) '{artist: $autor}',
       if (tono.isNotEmpty) '{key: $tono}',
       if (tempo.isNotEmpty) '{tempo: $tempo}',
+      if (timeSignature != null && timeSignature.isNotEmpty) '{time: $timeSignature}',
     ];
     if (cabecera.isEmpty) return resto.join('\n');
     return [...cabecera, '', ...resto].join('\n');
@@ -306,6 +406,7 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
       durationSec: parseDuration(duration.text),
       lastOpenedAt: widget.song?.lastOpenedAt,
       structure: _structure,
+      timeSignature: timeSignature.text.trim().isEmpty ? null : timeSignature.text.trim(),
     );
 
     if (widget.setlistId != null) {

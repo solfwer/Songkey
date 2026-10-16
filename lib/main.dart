@@ -9,6 +9,7 @@ import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'app.dart';
 import 'data/store.dart';
 import 'models/app_state.dart';
+import 'models/song.dart';
 import 'services/biblioteca_export.dart';
 
 void main() async {
@@ -51,14 +52,27 @@ void _processSharedFiles(List<SharedMediaFile> files, Store store) {
         final content = await File(path).readAsString();
         final data = jsonDecode(content) as Map<String, dynamic>;
         if (data['app'] == 'Songkey' && data['songs'] is List) {
-          // Importar silenciosamente (skip duplicados por defecto)
-          // El usuario puede re-importar con "Actualizar duplicados" si quiere
-          final res = mergeLibrary(store.state, content, updateExisting: false);
-          store.update((s) => AppState(
-            groups: [...s.groups, ...res.newGroups],
-            songs: [...res.newSongs, ...s.songs],
-            setlists: s.setlists,
-          ));
+          // Importar silenciosamente: saltar duplicados por defecto
+          final res = mergeLibrary(store.state, content, decisiones: {});
+          store.update((s) {
+            final canciones = <Song>[...s.songs];
+            // Aplicar canciones actualizadas (conservan su id y referencias de setlists)
+            for (final u in res.updatedSongs) {
+              final idx = canciones.indexWhere((x) => x.id == u.id);
+              if (idx >= 0) canciones[idx] = u;
+            }
+            // Aplicar canciones reemplazadas (borran la existente e insertan la importada)
+            for (final r in res.replacedSongs) {
+              final idx = canciones.indexWhere((x) => x.title.toLowerCase() == r.title.toLowerCase());
+              if (idx >= 0) canciones[idx] = r;
+              else canciones.add(r);
+            }
+            return AppState(
+              groups: [...s.groups, ...res.newGroups],
+              songs: [...res.newSongs, ...canciones],
+              setlists: s.setlists,
+            );
+          });
         }
       } catch (_) {
         // Silenciar errores de parsing
