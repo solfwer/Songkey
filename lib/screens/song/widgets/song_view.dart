@@ -206,20 +206,30 @@ class SongLineView extends StatelessWidget {
         style: TextStyle(fontFamily: 'monospace', height: chordLineHeight),
       );
     }
-    // Cada columna lleva un pequeo margen a los lados: as dos acordes
-    // seguidos ([A/C#][Am/C]) no se pegan y no se confunden al leer.
-    const margen = EdgeInsets.symmetric(horizontal: 3);
+    // Margen entre columnas solo cuando la letra no separa ya: as dos
+    // acordes pegados ([A/C#][Am/C]) no se confunden, pero no se aade hueco
+    // fantasma donde la letra tiene su espacio ("mi padre es [C]Dios" se
+    // lee "mi padre es Dios", no "mi padre es  Dios").
+    bool necesitaMargen(SongLine linea, int i) {
+      if (i <= 0) return false;
+      final prev = linea[i - 1].text;
+      return prev.isEmpty || !RegExp(r'\s$').hasMatch(prev);
+    }
+
     return Wrap(spacing: 0, runSpacing: 2, children: [
-      for (final seg in line)
+      for (var i = 0; i < line.length; i++)
         Padding(
-          padding: margen,
+          padding: EdgeInsets.only(
+            left: necesitaMargen(line, i) ? 3 : 0,
+            right: i < line.length - 1 && necesitaMargen(line, i + 1) ? 3 : 0,
+          ),
           child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                    seg.chord != null
-                        ? notateChord(transposeChord(seg.chord!, semitones),
+                    line[i].chord != null
+                        ? notateChord(transposeChord(line[i].chord!, semitones),
                             american: american)
                         : (line.any((x) => x.chord != null) ? ' ' : ''),
                     style: TextStyle(
@@ -228,7 +238,7 @@ class SongLineView extends StatelessWidget {
                         fontWeight: FontWeight.bold,
                         color: const Color(0xFF5AD1E6),
                         fontFamily: 'monospace')),
-                Text(seg.text.isEmpty ? ' ' : seg.text,
+                Text(line[i].text.isEmpty ? ' ' : line[i].text,
                     style: TextStyle(
                         fontSize: fontSize,
                         height: lineHeight,

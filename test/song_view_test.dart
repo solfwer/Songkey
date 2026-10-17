@@ -5,6 +5,7 @@ import 'package:appchords/models/song.dart';
 import 'package:appchords/screens/song/widgets/compact_song_view.dart';
 import 'package:appchords/screens/song/widgets/song_view.dart';
 import 'package:appchords/screens/song/widgets/view_options_panel.dart';
+import 'package:appchords/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -26,6 +27,16 @@ void main() {
     expect(config.shiftFor('cancion-b'), -1);
   });
 
+  test('el capo se recuerda por cancion y es independiente del tono', () {
+    final config = SongViewConfig(fontSize: 18);
+    expect(config.capoFor('cancion-a'), 0);
+    config.setCapo('cancion-a', 3);
+    expect(config.capoFor('cancion-a'), 3);
+    expect(config.capoFor('cancion-b'), 0); // otra cancion sin capo
+    config.setShift('cancion-a', 2);
+    expect(config.shiftFor('cancion-a'), 2); // tono y capo van por separado
+    expect(config.capoFor('cancion-a'), 3);
+  });
   testWidgets('vista compacta: cada seccion una sola vez con su contador', (tester) async {
     tester.view.physicalSize = const Size(400, 1500);
     tester.view.devicePixelRatio = 1.0;
@@ -90,5 +101,40 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.byType(PageView), findsOneWidget);
+  });
+  testWidgets('panel de opciones: tocar Capo 3 guarda el capo por cancion', (tester) async {
+    final scaffoldKey = GlobalKey<ScaffoldState>();
+    final config = SongViewConfig(fontSize: 18);
+    final song = Song(id: 's1', title: 'T', key: 'C', body: 'Verso 1\n[C]Hola');
+    await tester.pumpWidget(MaterialApp(
+      theme: darkTheme(),
+      home: Builder(
+        builder: (context) => Scaffold(
+          key: scaffoldKey,
+          appBar: AppBar(
+            actions: [
+              IconButton(icon: const Icon(Icons.tune), onPressed: () => scaffoldKey.currentState?.openEndDrawer()),
+            ],
+          ),
+          endDrawer: ViewOptionsPanel(
+            song: song,
+            hostContext: context,
+            config: config,
+            onChanged: () {},
+            onEdit: () async {},
+            onDelete: () {},
+            capoTranspose: 0,
+            capoActual: config.capoFor(song.id),
+            onCapoChanged: (t) => config.setCapo(song.id, t),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.byIcon(Icons.tune));
+    await tester.pumpAndSettle();
+    expect(config.capoFor(song.id), 0);
+    await tester.tap(find.text('3'));
+    await tester.pumpAndSettle();
+    expect(config.capoFor(song.id), 3);
   });
 }
