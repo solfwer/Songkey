@@ -112,4 +112,60 @@ void main() {
       expect(out, contains('frent[C#m]e'));
     });
   });
+
+  group('charIndexFor con borde derecho (endX)', () {
+    test('acorde sobre la última letra no se va al final', () {
+      const xs = [0.0, 10.0, 20.0, 30.0];
+      // X=34 cae entre la última letra (30) y el borde derecho (40): gana la última letra (dist 4 vs 6).
+      expect(charIndexFor(34, xs, endX: 40), xs.length - 1);
+    });
+
+    test('acorde más allá del borde derecho va al final', () {
+      const xs = [0.0, 10.0, 20.0, 30.0];
+      expect(charIndexFor(999, xs, endX: 40), xs.length);
+    });
+  });
+
+  group('salto de espacios', () {
+    test('acorde que cae en un espacio se pasa a la letra siguiente', () {
+      // "Hola  mundo": doble espacio; el acorde en el espacio ancla a la 'm' de mundo.
+      final line = place('G@36', 'Hola  mundo');
+      expect(line.chords.length, 1);
+      expect(line.chords.single.at, 6); // índice de la 'm' (H=0,o=1,l=2,a=3,' '=4,' '=5,m=6)
+      expect(line.lyric!.substring(line.chords.single.at), 'mundo');
+    });
+  });
+
+  group('tokens inválidos descartados', () {
+    test('chordsOf no devuelve fragmentos que no sean acordes', () {
+      // "C|hola": "hola" no es acorde, solo "C" debe salir.
+      final line = PdfLine(words: [
+        PdfWord(text: 'C|hola', left: 0, top: 20, right: 60, bottom: 32, fontSize: 12),
+      ]);
+      final cs = chordsOf(line);
+      expect(cs.length, 1);
+      expect(cs.single.chord, 'C');
+    });
+
+    test('chordOnlyLine no devuelve fragmentos que no sean acordes', () {
+      final line = PdfLine(words: [
+        PdfWord(text: 'CORO:', left: 0, top: 20, right: 40, bottom: 32, fontSize: 12),
+        PdfWord(text: 'C', left: 50, top: 20, right: 60, bottom: 32, fontSize: 12),
+        PdfWord(text: 'G', left: 70, top: 20, right: 80, bottom: 32, fontSize: 12),
+      ]);
+      final cp = chordOnlyLine(line);
+      expect(cp.bars, ['C', 'G']);
+    });
+  });
+
+  group('invariante de charX', () {
+    test('charX.length == text.length siempre', () {
+      final line = PdfLine(words: [
+        PdfWord(text: 'Hola', left: 0, top: 20, right: 40, bottom: 32, fontSize: 12),
+        PdfWord(text: 'mundo', left: 50, top: 20, right: 90, bottom: 32, fontSize: 12),
+      ]);
+      expect(line.text, 'Hola mundo'); // 10 caracteres (incluye el espacio)
+      expect(line.charX.length, line.text.length);
+    });
+  });
 }

@@ -1,10 +1,10 @@
 // Modelos del importador de PDF -> ChordPro.
 //
 // Todo lo de esta carpeta es Dart puro (sin Flutter ni dependencias de PDF):
-// se puede probar con lneas construidas a mano, que es lo que hacen los tests.
+// se puede probar con líneas construidas a mano, que es lo que hacen los tests.
 library;
 
-/// Una palabra tal como la da el PDF, con su rectngulo y su tamao de fuente.
+/// Una palabra tal como la da el PDF, con su rectángulo y su tamaño de fuente.
 class PdfWord {
   final String text;
   final double left;
@@ -13,8 +13,8 @@ class PdfWord {
   final double bottom;
   final double fontSize;
 
-  /// Posicin X de cada carcter de [text] (si el extractor la pudo dar). Si
-  /// viene vaca, se calcula a partes iguales entre [left] y [right].
+  /// Posición X de cada carácter de [text] (si el extractor la pudo dar). Si
+  /// viene vacía, se calcula a partes iguales entre [left] y [right].
   final List<double> glyphLefts;
 
   const PdfWord({
@@ -31,7 +31,7 @@ class PdfWord {
   double get height => bottom - top;
 }
 
-/// Una lnea del PDF: palabras que comparten fila (mismo Y aproximado).
+/// Una línea del PDF: palabras que comparten fila (mismo Y aproximado).
 class PdfLine {
   final List<PdfWord> words;
   final int page;
@@ -44,18 +44,23 @@ class PdfLine {
   double get right => words.isEmpty ? 0 : words.map((w) => w.right).reduce((a, b) => a > b ? a : b);
   double get height => bottom - top;
 
-  /// Texto de la lnea (palabras separadas por un espacio).
+  /// Texto de la línea (palabras separadas por UN espacio).
   String get text => words.map((w) => w.text).join(' ');
 
   bool get isEmpty => words.every((w) => w.text.trim().isEmpty);
 
-  /// Tamao de fuente medio (para la tolerancia de agrupacin por Y).
+  /// Tamaño de fuente medio (para la tolerancia de agrupación por Y).
   double get fontSize => words.isEmpty
       ? 12
       : words.map((w) => w.fontSize).reduce((a, b) => a + b) / words.length;
 
-  /// Posicin X estimada de cada carcter del texto de la lnea, en orden.
-  /// Los espacios entre palabras se interpolan con el hueco real.
+  /// Posición X de cada carácter de [text], en orden.
+  ///
+  /// INVARIANTE: `charX.length == text.length`. Como [text] separa las
+  /// palabras con un solo espacio, aquí cada hueco entre palabras aporta una
+  /// sola entrada (el borde izquierdo del espacio, donde termina la palabra
+  /// anterior). Antes se añadían hasta 6 entradas por hueco y todos los
+  /// acordes posteriores se desplazaban.
   List<double> get charX {
     final out = <double>[];
     for (var i = 0; i < words.length; i++) {
@@ -68,45 +73,38 @@ class PdfLine {
           out.add(w.left + step * k);
         }
       }
-      // Hueco hasta la palabra siguiente.
-      if (i + 1 < words.length) {
-        final gap = words[i + 1].left - w.right;
-        final steps = gap > 0 ? (gap / (w.fontSize * 0.28)).round().clamp(1, 6) : 1;
-        for (var s = 0; s < steps; s++) {
-          out.add(w.right + gap * (s + 1) / steps);
-        }
-      }
+      if (i + 1 < words.length) out.add(w.right);
     }
     return out;
   }
 }
 
-/// Qu tipo de contenido tiene una lnea.
+/// Qué tipo de contenido tiene una línea.
 enum LineKind {
   /// Solo acordes (`C#m | A | E`, `F G Em`).
   chords,
 
-  /// Letra (puede llevar algn acorde suelto).
+  /// Letra (puede llevar algún acorde suelto).
   lyric,
 
-  /// Encabezado de seccin (`VERSO 1`, `INTRODUCCIN:`...).
+  /// Encabezado de sección (`VERSO 1`, `INTRODUCCIÓN:`...).
   header,
 
-  /// Lnea vacia o slo smbolos.
+  /// Línea vacía o solo símbolos.
   empty,
 }
 
-/// Encabezado reconocido, con su directiva cannica y su etiqueta.
+/// Encabezado reconocido, con su directiva canónica y su etiqueta.
 class HeaderMatch {
   final String directive;
   final String label;
 
-  /// Texto que vena despus del encabezado (suele ser una progresin).
+  /// Texto que venía después del encabezado (suele ser una progresión).
   final String rest;
   const HeaderMatch({required this.directive, required this.label, this.rest = ''});
 }
 
-/// Una lnea ya clasificada.
+/// Una línea ya clasificada.
 class ClassifiedLine {
   final PdfLine line;
   final LineKind kind;
@@ -118,19 +116,22 @@ class ClassifiedLine {
   bool get isHeader => kind == LineKind.header;
 }
 
-/// Lo que el importador no tiene claro y se ensea al usuario para revisar.
+/// Lo que el importador no tiene claro y se enseña al usuario para revisar.
 enum WarningKind {
   /// El acorde no encuentra letra debajo.
   chordWithoutLyric,
 
-  /// La lnea no se sabe muy bien qu es.
+  /// La línea no se sabe muy bien qué es.
   ambiguous,
 
   /// Se ha detectado mezcla de dos columnas.
   mixedColumn,
 
-  /// No se ha podido detectar el ttulo.
+  /// No se ha podido detectar el título.
   noTitle,
+
+  /// El PDF no tiene texto (escaneado o foto).
+  noText,
 }
 
 class ImportWarning {
@@ -140,5 +141,5 @@ class ImportWarning {
   const ImportWarning(this.kind, this.line, this.message);
 
   @override
-  String toString() => 'Lnea $line: $message';
+  String toString() => 'Línea $line: $message';
 }

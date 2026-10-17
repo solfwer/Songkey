@@ -67,8 +67,10 @@ void main() {
       expect(res.chordPro, contains('{title: MI CANCION}'));
       expect(res.chordPro, contains('{start_of_introduccion: INTRODUCCIÓN}'));
       expect(res.chordPro, contains('[C#m] | [A] | [E]'));
-      expect(res.chordPro, contains('{start_of_verse: VERSO 1}'));
-      // El acorde queda en su silaba.
+      // La línea del título se excluye del cuerpo: no hay encabezado de verso,
+      // así que no debe aparecer {start_of_verse: VERSO 1}.
+      expect(res.chordPro, isNot(contains('{start_of_verse: VERSO 1}')));
+      // El acorde queda en su sílaba (dentro de la sección de introducción).
       expect(res.chordPro, contains('[Am]Hola'));
       expect(res.warnings.where((w) => w.kind == WarningKind.chordWithoutLyric), isEmpty);
     });
@@ -197,6 +199,43 @@ void main() {
         txt('letra sin encabezar', top: 100),
       ], fallbackTitle: 'archivo.pdf');
       expect(res.title, 'archivo.pdf');
+    });
+
+    test('el titulo detectado gana sobre el nombre del archivo', () {
+      final res = service.buildFromLines([
+        txt('MI CANCION', top: 60, fontSize: 22),
+        txt('letra de la cancion', top: 100),
+      ], fallbackTitle: 'archivo.pdf');
+      expect(res.title, 'MI CANCION');
+    });
+
+    test('avisa noTitle si no hay ni detectado ni fallback', () {
+      final res = service.buildFromLines([
+        txt('letra sin encabezar', top: 100),
+      ]);
+      expect(res.title, 'Canción');
+      final avisos = res.warnings.where((w) => w.kind == WarningKind.noTitle);
+      expect(avisos, isNotEmpty);
+    });
+
+    test('la línea del título no aparece en el cuerpo', () {
+      final res = service.buildFromLines([
+        txt('MI CANCION', top: 60, fontSize: 22),
+        txt('letra de la cancion', top: 100),
+      ]);
+      // La línea del título no está en el cuerpo (solo en el metadato {title:}).
+      expect(res.chordPro, contains('{title: MI CANCION}'));
+      expect(res.chordPro, isNot(contains('\nMI CANCION\n')));
+      expect(res.chordPro, contains('letra de la cancion'));
+    });
+
+    test('PDF sin texto devuelve aviso noText', () {
+      final res = service.buildFromLines([]);
+      expect(res.title, 'Canción');
+      expect(res.chordPro, isEmpty);
+      final avisos = res.warnings.where((w) => w.kind == WarningKind.noText);
+      expect(avisos, isNotEmpty);
+      expect(avisos.first.message, contains('escaneado'));
     });
   });
 }
