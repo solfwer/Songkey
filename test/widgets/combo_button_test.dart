@@ -92,6 +92,35 @@ void main() {
     expect(pressed, isTrue);
   });
 
+  testWidgets('ComboButton sin ancho fijo no queda con alto infinito en Column '
+      '(alto ilimitado, como la biblioteca)', (WidgetTester tester) async {
+    // Column pasa a sus hijos no-flex maxHeight = Infinity. Con
+    // crossAxisAlignment.stretch el Row interno forcaba tightFor(height: Infinity)
+    // y la capa de pintura quedaba con matriz inválida (pantalla negra en release).
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Column(
+            children: [
+              ComboButton<String>(
+                label: 'Añadir',
+                icon: Icons.add,
+                onPressed: () {},
+                menuItems: [
+                  PopupMenuItem(value: 'pdf', child: const Text('Importar PDF')),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final size = tester.getSize(find.byType(ComboButton<String>));
+    expect(size.height.isFinite, isTrue);
+    expect(size.height, equals(40));
+  });
+
   testWidgets('ComboButton con ancho fijo respeta onPressed',
       (WidgetTester tester) async {
     var pressed = false;

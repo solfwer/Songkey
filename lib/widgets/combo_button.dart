@@ -92,7 +92,6 @@ class ComboButton<T> extends StatelessWidget {
         width: width,
         decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Zona principal: acción inmediata. Sin ancho fijo no usa flex (está
             // sin límites en Row), así que no rompe con constraints ilimitados.
