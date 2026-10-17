@@ -55,15 +55,14 @@ class ComboButton<T> extends StatelessWidget {
     final bg = backgroundColor ?? AppColors.primary;
 
     Widget primaryRegion = Container(
-      width: double.infinity,
       height: height,
+      padding: const EdgeInsets.symmetric(horizontal: 14),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), bottomLeft: Radius.circular(12)),
       ),
       alignment: Alignment.center,
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           if (icon != null) ...[
@@ -95,9 +94,10 @@ class ComboButton<T> extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Zona principal: acción inmediata.
+            // Zona principal: acción inmediata. Sin ancho fijo no usa flex (está
+            // sin límites en Row), así que no rompe con constraints ilimitados.
             Expanded(
-              flex: width == null ? 1 : 0,
+              flex: width == null ? 0 : 1,
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(

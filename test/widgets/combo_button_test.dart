@@ -60,4 +60,61 @@ void main() {
 
     expect(selected, 'pdf');
   });
+
+  testWidgets('ComboButton sin ancho fijo dentro de un Row (como la biblioteca)',
+      (WidgetTester tester) async {
+    var pressed = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Row(
+            children: [
+              Expanded(child: const TextField()),
+              const SizedBox(width: 8),
+              ComboButton<String>(
+                label: 'Añadir',
+                icon: Icons.add,
+                onPressed: () => pressed = true,
+                menuItems: [
+                  PopupMenuItem(value: 'pdf', child: const Text('Importar PDF')),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Añadir'));
+    await tester.pumpAndSettle();
+
+    expect(pressed, isTrue);
+  });
+
+  testWidgets('ComboButton con ancho fijo respeta onPressed',
+      (WidgetTester tester) async {
+    var pressed = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ComboButton<String>(
+            label: 'Añadir',
+            icon: Icons.add,
+            width: 300,
+            onPressed: () => pressed = true,
+            menuItems: [
+              PopupMenuItem(value: 'pdf', child: const Text('Importar PDF')),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Añadir'));
+    await tester.pumpAndSettle();
+
+    expect(pressed, isTrue);
+  });
 }
