@@ -1,7 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:appchords/data/chord_parser.dart';
-import 'package:appchords/services/pdf_import.dart';
+import 'package:appchords/services/pdf_chordpro/pdf_to_chordpro_service.dart'
+    show keyFromBody, suggestedKeyFromBody;
 
 void main() {
   test('headerInfo reconoce Transición e Instrumental', () {

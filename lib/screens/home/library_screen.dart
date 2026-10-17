@@ -11,7 +11,8 @@ import '../../data/format.dart';
 import '../../data/store.dart';
 import '../../models/app_state.dart';
 import '../../models/song.dart';
-import '../../services/pdf_import.dart';
+import '../../services/pdf_chordpro/pdf_to_chordpro_service.dart';
+import '../song/pdf_review_page.dart';
 import '../../theme.dart';
 import '../../widgets/combo_button.dart';
 import '../song/song_editor_page.dart';
@@ -62,13 +63,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final file = res?.files.firstOrNull;
     final bytes = file?.bytes;
     if (file == null || bytes == null) return;
+    final base = file.name.replaceAll(RegExp(r'\.pdf$', caseSensitive: false), '');
     try {
-      final draft = await pdfToDraft(file.name, bytes);
+      final conversion = const PdfToChordProService().convert(bytes, fallbackTitle: base);
       if (!mounted) return;
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongEditorPage(store: widget.store, initialTitle: draft.title, initialBody: draft.body)));
+      if (conversion.chordPro.trim().isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('El PDF no trae letra con acordes que se pueda convertir')));
+        }
+        return;
+      }
+      if (!mounted) return;
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => PdfReviewPage(store: widget.store, conversion: conversion)));
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se pudo leer el PDF (¿escaneado?)')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se pudo leer el PDF (¿escaneado como imagen?)')));
       }
     }
   }
