@@ -27,6 +27,10 @@ class SongOverride {
   List<String>? structure;
   String? timeSignature;
 
+  /// Capo en trastes (0 = sin capo). Se guarda solo en el override del
+  /// setlist: fuera de un setlist el capo es transitorio (sesión).
+  int? capo;
+
   SongOverride({
     required this.songId,
     required this.title,
@@ -38,6 +42,7 @@ class SongOverride {
     this.durationSec,
     this.structure,
     this.timeSignature,
+    this.capo,
   });
 
   Map<String, dynamic> toJson() => {
@@ -51,6 +56,7 @@ class SongOverride {
         'durationSec': durationSec,
         'structure': structure,
         'timeSignature': timeSignature,
+        'capo': capo,
       };
 
   factory SongOverride.fromJson(Map<String, dynamic> j) => SongOverride(
@@ -64,6 +70,7 @@ class SongOverride {
         durationSec: j['durationSec'] as int?,
         structure: (j['structure'] as List?)?.map((e) => e.toString()).toList(),
         timeSignature: j['timeSignature'],
+        capo: j['capo'] as int?,
       );
 
   /// Convierte el override en una Song completa (para uso en pantalla).

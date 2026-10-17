@@ -36,12 +36,22 @@ class SongViewConfig {
   /// mueva esa canción y las demás se queden en su tono original.
   final Map<String, int> _shiftBySong = {};
 
+  /// Capo en trastes elegido para cada canción (0 = sin capo). Fuera de un
+  /// setlist es transitorio (solo la sesión); dentro de un setlist se
+  /// persiste en el override del setlist.
+  final Map<String, int> _capoBySong = {};
+
   SongViewConfig({required this.fontSize, this.lyricsOnly = false, this.americanNotation = true});
 
   /// Semitonos de transposición de una canción (0 = su tono original).
   int shiftFor(String songId) => _shiftBySong[songId] ?? 0;
 
   void setShift(String songId, int semitones) => _shiftBySong[songId] = semitones;
+
+  /// Trastes de capo de una canción (0 = sin capo).
+  int capoFor(String songId) => _capoBySong[songId] ?? 0;
+
+  void setCapo(String songId, int trastes) => _capoBySong[songId] = trastes;
 
   /// Activa el desplazamiento automático (desde Opciones de vista).
   void enableAutoScroll() {
@@ -76,6 +86,16 @@ class ViewOptionsPanel extends StatelessWidget {
   final Future<void> Function() onEdit;
   final VoidCallback onDelete;
 
+  /// Trastes de capo que ya se aplican (para compartir/exportar). Fuera de
+  /// un setlist va en [config]; dentro, viene del override del setlist.
+  final int capoTranspose;
+
+  /// Capo actual (para marcar el chip seleccionado).
+  final int capoActual;
+
+  /// Se invoca al elegir un traste de capo.
+  final ValueChanged<int> onCapoChanged;
+
   const ViewOptionsPanel({
     super.key,
     required this.song,
@@ -85,6 +105,9 @@ class ViewOptionsPanel extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     this.compactView = false,
+    this.capoTranspose = 0,
+    this.capoActual = 0,
+    required this.onCapoChanged,
   });
 
   Widget _panelLabel(String text) {
@@ -160,6 +183,43 @@ class ViewOptionsPanel extends StatelessWidget {
                   config.lyricsOnly = true;
                   onChanged();
                 }),
+              ]),
+            ),
+          ]),
+          _panelLabel('Capo'),
+          _panelCard([
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+              child: Column(children: [
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    for (final t in [0, 1, 2, 3, 4, 5, 6, 7])
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        child: ChoiceChip(
+                          avatar: const Icon(Icons.tune, size: 16),
+                          label: Text(t == 0 ? 'Sin' : t.toString()),
+                          selected: capoActual == t,
+                          selectedColor: AppColors.primary,
+                          showCheckmark: false,
+                          onSelected: (_) => onCapoChanged(t),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    capoActual == 0
+                        ? 'Sin capo: suena como está escrito'
+                        : 'Capo traste $capoActual: los acordes se ven ${capoActual == 1 ? 'un semitono' : '$capoActual semitonos'} más alto',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ),
               ]),
             ),
           ]),
@@ -263,7 +323,7 @@ class ViewOptionsPanel extends StatelessWidget {
               subtitle: const Text('Texto con acordes en el tono actual'),
               onTap: () async {
                 Navigator.pop(context);
-                await shareSongText(hostContext, song, semitones: config.shiftFor(song.id), lyricsOnly: config.lyricsOnly);
+                await shareSongText(hostContext, song, semitones: config.shiftFor(song.id) + config.capoFor(song.id) + capoTranspose, lyricsOnly: config.lyricsOnly);
               },
             ),
             ListTile(
@@ -272,7 +332,7 @@ class ViewOptionsPanel extends StatelessWidget {
               subtitle: const Text('Cancion en el tono actual; puedes compartirla o guardarla en el telfono'),
               onTap: () async {
                 Navigator.pop(context);
-                await shareSongPdf(hostContext, song, semitones: config.shiftFor(song.id), lyricsOnly: config.lyricsOnly);
+                await shareSongPdf(hostContext, song, semitones: config.shiftFor(song.id) + config.capoFor(song.id) + capoTranspose, lyricsOnly: config.lyricsOnly);
               },
             ),
           ]),

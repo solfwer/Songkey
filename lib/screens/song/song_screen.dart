@@ -114,6 +114,7 @@ class _SongScreenState extends State<SongScreen> {
       durationSec: override?.durationSec ?? original.durationSec,
       structure: override?.structure ?? original.structure,
       timeSignature: override?.timeSignature ?? original.timeSignature,
+      capo: override?.capo,
     );
     widget.store.update((st) => AppState(
           groups: st.groups,
@@ -123,6 +124,51 @@ class _SongScreenState extends State<SongScreen> {
             return l.withOverride(songId, nuevoOverride);
           }).toList(),
         ));
+  }
+
+  /// Guarda el capo de una canción en el override del setlist (no modifica la original).
+  void _guardarCapoEnSetlist(String songId, int trastes) {
+    final s = widget.store.state;
+    final list = s.setlists.where((l) => l.id == widget.setlistId).firstOrNull;
+    if (list == null) return;
+    final original = s.songs.where((x) => x.id == songId).firstOrNull;
+    if (original == null) return;
+    final override = list.getOverride(songId);
+    final nuevoOverride = SongOverride(
+      songId: songId,
+      title: override?.title ?? original.title,
+      author: override?.author ?? original.author,
+      key: override?.key ?? original.key,
+      bpm: override?.bpm ?? original.bpm,
+      body: override?.body ?? original.body,
+      style: override?.style ?? original.style,
+      durationSec: override?.durationSec ?? original.durationSec,
+      structure: override?.structure ?? original.structure,
+      timeSignature: override?.timeSignature ?? original.timeSignature,
+      capo: trastes,
+    );
+    widget.store.update((st) => AppState(
+          groups: st.groups,
+          songs: st.songs,
+          setlists: st.setlists.map((l) {
+            if (l.id != widget.setlistId) return l;
+            return l.withOverride(songId, nuevoOverride);
+          }).toList(),
+        ));
+  }
+
+  /// Override de [songId] en el setlist actual (null si no hay setlist ni override).
+  SongOverride? _obtenerOverride(String songId) {
+    if (widget.setlistId == null) return null;
+    final list = widget.store.state.setlists.where((l) => l.id == widget.setlistId).firstOrNull;
+    return list?.getOverride(songId);
+  }
+
+  /// Semitonos totales de transposición para mostrar [songId]: selector de tono
+  /// + capo. Dentro de un setlist, el capo vive en el override.
+  int _semitonesTotales(String songId) {
+    final capo = widget.setlistId != null ? (_obtenerOverride(songId)?.capo ?? 0) : config.capoFor(songId);
+    return config.shiftFor(songId) + capo;
   }
 
   Future<void> _delete(Song song) async {
@@ -164,6 +210,8 @@ class _SongScreenState extends State<SongScreen> {
     final ids = _setlistSongIds(s);
     final swipe = ids.length > 1;
     final displayed = swipe ? _resolveSong(s.songs.where((x) => x.id == _visibleSongId).firstOrNull ?? song, s) : _resolveSong(song, s);
+    // Semitonos totales de transposición (selector de tono + capo) para esta canción.
+    final tonoSemitones = _semitonesTotales(displayed.id);
 
     // El BPM del metrónomo se adapta a esta canción (si tiene BPM definido).
     _metro.syncWithSong(displayed);
@@ -181,15 +229,19 @@ class _SongScreenState extends State<SongScreen> {
         actions: [
           _KeySelector(
             currentKey: widget.setlistId != null
-                ? displayed.key
-                : sharpen(transposeChord(displayed.key, config.shiftFor(displayed.id))),
+                ? sharpen(transposeChord(displayed.key, _obtenerOverride(displayed.id)?.capo ?? 0))
+                : sharpen(transposeChord(
+                    displayed.key, config.shiftFor(displayed.id) + config.capoFor(displayed.id))),
             american: config.americanNotation,
             onSelected: (k) {
               if (widget.setlistId != null) {
                 // Guardar el tono en el override del setlist (no toca la original)
                 _guardarTonoEnSetlist(displayed.id, k);
               } else {
-                setState(() => config.setShift(displayed.id, semitoneShift(displayed.key, k)));
+                // El capo ya suma semitonos: el selector ajusta solo lo que falta
+                // para que el tono sonando sea el elegido.
+                setState(() => config.setShift(
+                    displayed.id, semitoneShift(displayed.key, k) - config.capoFor(displayed.id)));
               }
             },
           ),
@@ -211,6 +263,17 @@ class _SongScreenState extends State<SongScreen> {
         hostContext: context,
         config: config,
         compactView: widget.store.compactView,
+        // Capo: dentro de un setlist se guarda en el override; fuera es transitorio.
+        capoTranspose: widget.setlistId != null ? (_obtenerOverride(displayed.id)?.capo ?? 0) : 0,
+        capoActual: widget.setlistId != null ? (_obtenerOverride(displayed.id)?.capo ?? 0) : config.capoFor(displayed.id),
+        onCapoChanged: (traste) {
+          if (widget.setlistId != null) {
+            _guardarCapoEnSetlist(displayed.id, traste);
+          } else {
+            config.setCapo(displayed.id, traste);
+          }
+          setState(() {});
+        },
         onChanged: () => setState(() {}),
         onEdit: () async {
           await Navigator.of(context).push(MaterialPageRoute(builder: (_) => SongEditorPage(store: widget.store, song: displayed, setlistId: widget.setlistId)));
@@ -229,10 +292,10 @@ class _SongScreenState extends State<SongScreen> {
                   itemBuilder: (context, i) {
                     final pageSong = s.songs.where((x) => x.id == ids[i]).firstOrNull;
                     if (pageSong == null) return const SizedBox.shrink();
-                    return _SongPage(song: _resolveSong(pageSong, s), store: widget.store, config: config);
+                    return _SongPage(song: _resolveSong(pageSong, s), store: widget.store, config: config, semitones: _semitonesTotales(pageSong.id));
                   },
                 )
-              : _SongPage(song: displayed, store: widget.store, config: config),
+              : _SongPage(song: displayed, store: widget.store, config: config, semitones: tonoSemitones),
         ),
       ]),
     );
@@ -276,7 +339,10 @@ class _SongPage extends StatefulWidget {
   final Song song;
   final Store store;
   final SongViewConfig config;
-  const _SongPage({required this.song, required this.store, required this.config});
+  /// Semitonos totales de transposición (tono + capo), precomputados en la
+  /// pantalla (ahí se sabe si hay setlist activo).
+  final int semitones;
+  const _SongPage({required this.song, required this.store, required this.config, required this.semitones});
 
   @override
   State<_SongPage> createState() => _SongPageState();
@@ -349,7 +415,7 @@ class _SongPageState extends State<_SongPage> {
             ? CompactSongView(
                 song: widget.song,
                 lyricsOnly: widget.config.lyricsOnly,
-                semitones: widget.config.shiftFor(widget.song.id),
+                semitones: widget.semitones,
                 american: widget.config.americanNotation,
                 // El tamao lo manda el usuario desde el panel de opciones.
                 autoFit: true,
@@ -359,14 +425,14 @@ class _SongPageState extends State<_SongPage> {
                 ? AutoFitSongBody(
                     sections: sections,
                     lyricsOnly: widget.config.lyricsOnly,
-                    semitones: widget.config.shiftFor(widget.song.id),
+                    semitones: widget.semitones,
                     american: widget.config.americanNotation,
                     maxFontSize: widget.config.fontSize,
                   )
                 : SongBodyList(
                     sections: sections,
                     lyricsOnly: widget.config.lyricsOnly,
-                    semitones: widget.config.shiftFor(widget.song.id),
+                    semitones: widget.semitones,
                     fontSize: widget.config.fontSize,
                     american: widget.config.americanNotation,
                     controller: _scrollController,
