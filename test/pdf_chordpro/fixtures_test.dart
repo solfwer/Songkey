@@ -11,6 +11,12 @@ import 'package:flutter_test/flutter_test.dart';
 
 const _dir = 'test/pdf_chordpro/fixtures';
 
+/// Para regenerar los `.cho` esperados despues de un cambio INTENCIONADO del
+/// importador (revisa el diff con git antes de guardarlos):
+///   Windows (PowerShell):  $env:UPDATE_FIXTURES='1'; flutter test test/pdf_chordpro/fixtures_test.dart
+///   Mac/Linux:             UPDATE_FIXTURES=1 flutter test test/pdf_chordpro/fixtures_test.dart
+final _update = Platform.environment['UPDATE_FIXTURES'] == '1';
+
 String _expectedPath(String pdfPath) =>
     pdfPath.replaceAll(RegExp(r'\.pdf$', caseSensitive: false), '.cho');
 
@@ -38,7 +44,12 @@ void main() {
     });
 
     final expected = File(_expectedPath(pdf.path));
-    if (expected.existsSync()) {
+    if (_update) {
+      test('$name: regenera su .cho esperado', () {
+        final res = const PdfToChordProService().convert(pdf.readAsBytesSync());
+        expected.writeAsStringSync('${res.chordPro.trim()}\n');
+      });
+    } else if (expected.existsSync()) {
       test('$name coincide con su .cho esperado', () {
         final res = const PdfToChordProService().convert(pdf.readAsBytesSync());
         expect(res.chordPro.trim(), expected.readAsStringSync().trim());

@@ -20,6 +20,7 @@ import 'package:syncfusion_flutter_pdf/pdf.dart';
 import '../../data/chord_parser.dart';
 import '../../data/chordpro.dart';
 import 'chord_mapper.dart';
+import 'layout_text_lines.dart';
 import 'line_classifier.dart';
 import 'pdf_line_processor.dart' show detectColumnSplit, flattenWords, groupLines;
 import 'pdf_models.dart';
@@ -382,7 +383,11 @@ class PdfToChordProService {
     return mixed / lines.length <= _maxMixedLines;
   }
 
-  /// Líneas tal como las ve el lector (texto en modo layout), sin coordenadas.
+  /// Líneas tal como las ve el lector (texto en modo layout).
+  ///
+  /// No hay coordenadas verticales, pero SÍ columnas: la posición de cada
+  /// palabra en la fila se conserva para que cada acorde quede sobre su sílaba
+  /// (ver [linesFromLayoutText]).
   List<PdfLine> _linesFromLayout(PdfDocument doc) {
     final extractor = PdfTextExtractor(doc);
     final out = <PdfLine>[];
@@ -392,18 +397,7 @@ class PdfToChordProService {
         endPageIndex: page,
         layoutText: true,
       );
-      for (final raw in text.split('\n')) {
-        final clean = raw.trim();
-        if (clean.isEmpty) continue;
-        if (RegExp(r'^\d{1,3}$').hasMatch(clean)) continue;
-        final words = [
-          for (final t in clean.split(RegExp(r'\s+')))
-            if (t.isNotEmpty)
-              PdfWord(text: t, left: 0, top: 0, right: 0, bottom: 0, page: page),
-        ];
-        if (words.isEmpty) continue;
-        out.add(PdfLine(words: words, page: page, positioned: false));
-      }
+      out.addAll(linesFromLayoutText(text, page: page));
     }
     return out;
   }

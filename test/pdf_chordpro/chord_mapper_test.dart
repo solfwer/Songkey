@@ -2,6 +2,7 @@
 import 'package:appchords/data/chord_parser.dart';
 import 'package:appchords/data/chordpro.dart';
 import 'package:appchords/services/pdf_chordpro/chord_mapper.dart';
+import 'package:appchords/services/pdf_chordpro/layout_text_lines.dart';
 import 'package:appchords/services/pdf_chordpro/pdf_models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -98,10 +99,18 @@ void main() {
       expect(ats[1], lessThanOrEqualTo(ats[2]));
     });
 
-    test('dos acordes en el mismo punto no se solapan', () {
+    test('dos acordes en el mismo punto se quedan ahi, en orden de lectura', () {
+      // Antes el segundo se empujaba a la derecha y acababa sobre otra silaba.
       final line = place('Am@50 Am7@50', 'Hola mundo');
       expect(line.chords.length, 2);
-      expect(line.chords[0].at != line.chords[1].at, isTrue);
+      expect(line.chords[0].at, line.chords[1].at);
+      expect(line.chords.map((c) => c.chord).toList(), ['Am', 'Am7']);
+    });
+
+    test('un acorde nunca se mueve por la presencia de otro', () {
+      final solo = place('Am7@50', 'Hola mundo').chords.single.at;
+      final junto = place('Am@50 Am7@50', 'Hola mundo').chords.last.at;
+      expect(junto, solo);
     });
   });
 
@@ -179,6 +188,49 @@ void main() {
       ]);
       expect(line.text, 'Hola mundo'); // 10 caracteres (incluye el espacio)
       expect(line.charX.length, line.text.length);
+    });
+  });
+
+  group('texto en modo layout (con columnas)', () {
+    // La columna de cada acorde dice sobre que letra va: no se puede juntar
+    // todo a la izquierda.
+    CpLine fromLayout(String chordRow, String lyricRow) {
+      final lines = linesFromLayoutText('$chordRow\n$lyricRow');
+      expect(lines.length, 2);
+      return placeChordsOnLyric(chordsOf(lines[0]), lines[1]);
+    }
+
+    test('cada acorde queda sobre su letra, no todos al inicio', () {
+      //       D        G
+      final line = fromLayout('          D           G', 'Nos humillamos delante');
+      expect(line.lyric, 'Nos humillamos delante');
+      expect(line.chords.map((c) => c.chord).toList(), ['D', 'G']);
+      final ats = line.chords.map((c) => c.at).toList();
+      expect(ats[0] > 0, isTrue);
+      expect(ats[1] > ats[0], isTrue);
+    });
+
+    test('acorde en la columna 0 de la letra queda al principio', () {
+      final line = fromLayout('C', 'Hola mundo');
+      expect(line.chords.single.at, 0);
+      expect(line.lyric, 'Hola mundo'); // sin espacios anadidos
+    });
+
+    test('la sangria de la izquierda cuenta (no se recorta)', () {
+      // Los dos renglones empiezan a la misma columna: el acorde sigue sobre la H.
+      final line = fromLayout('      C', '      Hola mundo');
+      expect(line.chords.single.at, 0);
+    });
+
+    test('ida y vuelta: el acorde cae en medio de la palabra', () {
+      final line = fromLayout('         Am', 'Sacrificio agradable');
+      final out = const ChordProSerializer().write(ChordProSong(sections: [
+        CpSection(directive: 'verse', label: 'VERSO 1', kind: SectionKind.verse, lines: [line]),
+      ]));
+      // Columna 9 = la ultima letra de "Sacrificio": el acorde queda ahi,
+      // no al inicio de la linea.
+      expect(out, contains('Sacrifici[Am]o agradable'));
+      expect(out.contains('[Am]Sacrificio'), isFalse);
     });
   });
 }

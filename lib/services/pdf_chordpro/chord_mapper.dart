@@ -38,9 +38,11 @@ CpLine placeChordsOnLyric(List<ChordAt> chords, PdfLine lyric) {
   if (chords.isEmpty) return CpLine.lyricLine(text);
   if (text.isEmpty) return CpLine.lyricLine(text);
 
-  // Sin coordenadas fiables (texto en modo layout): los acordes van al
-  // principio de la línea, en orden de lectura.
-  if (!lyric.positioned) {
+  // Sin ninguna coordenada (todo a 0): no hay forma de saber sobre qué sílaba
+  // va cada acorde, así que van al principio, en orden de lectura.
+  // OJO: el texto en modo layout NO entra aquí aunque `positioned` sea false,
+  // porque sus palabras sí traen columnas (ver linesFromLayoutText).
+  if (!lyric.positioned && !_hasColumns(lyric)) {
     return CpLine.lyricLine(text, [for (final c in chords) CpChord(0, c.chord)]);
   }
 
@@ -65,22 +67,15 @@ CpLine placeChordsOnLyric(List<ChordAt> chords, PdfLine lyric) {
   final endX = lyric.words.isNotEmpty ? lyric.words.last.right : null;
 
   final placements = <({int at, String chord, int order})>[];
-  final used = <int>{};
 
   for (var i = 0; i < chords.length; i++) {
     final c = chords[i];
     var at = charIndexFor(c.x, charX, endX: endX);
     if (at > text.length) at = text.length;
 
-    // Si cae al inicio (0) y la letra empieza inmediatamente, insertar
-    // un espacio antes para que no queden pegados [D][G]Nos.
-    if (at == 0 && text.isNotEmpty && text[0].trim().isNotEmpty) {
-      // Dejar acorde en 0 pero asegurarnos de que haya separador visual en output
-      // (el serializador maneja espaciado; aquí solo evitamos desplazamiento).
-      at = 0;
-    }
-
-    // Si cae en un espacio, saltar todos los espacios consecutivos.
+    // Si cae justo en un espacio entre palabras, el acorde pertenece a la
+    // sílaba que viene después (un solo carácter más allá: el texto separa las
+    // palabras con UN espacio).
     if (at < text.length && text[at].trim().isEmpty) {
       while (at < text.length && text[at].trim().isEmpty) {
         at++;
@@ -88,30 +83,11 @@ CpLine placeChordsOnLyric(List<ChordAt> chords, PdfLine lyric) {
       if (at >= text.length) at = text.length - 1;
     }
 
-    // Resolver colisiones: mantener posición lo más cerca posible,
-    // sin desplazamiento excesivo a la derecha (evita que se junten
-    // los acordes en la izquierda de la línea).
-    var attempts = 0;
-    while (used.contains(at) && at < text.length && attempts < text.length) {
-      at++;
-      attempts++;
-    }
-    // Si después de resolver colisiones caímos en un espacio, ajustar.
-    if (at < text.length && text[at].trim().isEmpty) {
-      var bestAt = at;
-      var bestDist = double.infinity;
-      for (var check = 0; check < text.length; check++) {
-        if (!used.contains(check) && text[check].trim().isNotEmpty) {
-          final dist = (check - at).abs().toDouble();
-          if (dist < bestDist) {
-            bestDist = dist;
-            bestAt = check;
-          }
-        }
-      }
-      at = bestAt;
-    }
-    used.add(at);
+    // IMPORTANTE: no se resuelven "colisiones" moviendo acordes. Antes, si dos
+    // acordes caían en el mismo carácter, el segundo se empujaba a la derecha
+    // o se buscaba "el carácter libre más cercano", y el acorde terminaba
+    // sobre otra sílaba. Dos acordes en el mismo punto son válidos en ChordPro
+    // (`[Bm][A]palabra`); se quedan donde estaban, en orden de lectura.
     placements.add((at: at, chord: c.chord, order: i));
   }
 
@@ -122,20 +98,15 @@ CpLine placeChordsOnLyric(List<ChordAt> chords, PdfLine lyric) {
     return d != 0 ? d : a.order.compareTo(b.order);
   });
 
-  // FIX: evitar [D][G]Nos (acordes pegados a letra sin espacio inicial)
-  var outText = text;
-  var outPlacements = placements;
-  if (outPlacements.isNotEmpty && outPlacements.first.at == 0 && text.isNotEmpty && text[0].trim().isNotEmpty) {
-    outText = ' $text';
-    outPlacements = [
-      for (final p in outPlacements) (at: p.at + 1, chord: p.chord, order: p.order)
-    ];
-  }
-
-  return CpLine.lyricLine(outText, [
-    for (final p in outPlacements) CpChord(p.at, p.chord),
+  // La letra se entrega tal cual: sin espacios añadidos que la cambien.
+  return CpLine.lyricLine(text, [
+    for (final p in placements) CpChord(p.at, p.chord),
   ]);
 }
+
+/// true si las palabras de [line] traen columnas/coordenadas X utilizables
+/// (right > left). Las líneas "sin nada" tienen todo a 0.
+bool _hasColumns(PdfLine line) => line.words.any((w) => w.right > w.left);
 
 /// Índice del borde de carácter más cercano a [x].
 ///
