@@ -440,9 +440,9 @@ class _StructureTabState extends State<StructureTab> {
           builder: (context, candidate, rejected) => Container(
             margin: const EdgeInsets.only(right: 6, top: 6),
             decoration: BoxDecoration(
-              color: Colors.white10,
+              color: Theme.of(context).colorScheme.surfaceContainerLowest,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: candidate.isNotEmpty ? Theme.of(context).colorScheme.primary : Colors.white24),
+              border: Border.all(color: candidate.isNotEmpty ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.outlineVariant),
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               _tituloPanel(Icons.queue_music, 'Estructura actual', '${_arr.length} partes'),
@@ -493,7 +493,7 @@ class _StructureTabState extends State<StructureTab> {
         flex: flex,
         child: Container(
           margin: const EdgeInsets.only(left: 0, top: 6),
-          decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white24)),
+          decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainerLowest, borderRadius: BorderRadius.circular(12), border: Border.all(color: Theme.of(context).colorScheme.outlineVariant)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             _tituloPanel(Icons.library_music, 'Secciones', '${_disponibles.length} en total'),
             Expanded(
@@ -538,6 +538,10 @@ class _StructureTabState extends State<StructureTab> {
   }
 }
 
+/// Ancho fijo del grupo de controles: así los botones de todas las tarjetas
+/// caen en la misma columna, sin importar cuánto mida el chip de la sección.
+const double _anchoControles = 176;
+
 /// Tarjeta de una aparición en el orden de toque.
 class _TarjetaOrden extends StatelessWidget {
   final int index;
@@ -576,43 +580,50 @@ class _TarjetaOrden extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
+        padding: const EdgeInsets.fromLTRB(4, 6, 10, 6),
         child: Row(children: [
           ReorderableDragStartListener(index: index, child: const Padding(padding: EdgeInsets.all(6), child: Icon(Icons.drag_handle, color: Colors.grey, size: 20))),
           const SizedBox(width: 4),
-          Flexible(child: HeaderBadge(line: nombre.isEmpty ? '(texto inicial)' : nombre)),
-          const Spacer(),
-          // Repeticiones
-          IconButton(visualDensity: VisualDensity.compact, tooltip: 'Suena menos veces', icon: const Icon(Icons.remove, size: 18), onPressed: onMenos),
-          Text('x$repeat', style: const TextStyle(fontWeight: FontWeight.bold)),
-          IconButton(visualDensity: VisualDensity.compact, tooltip: 'Suena más veces', icon: const Icon(Icons.add, size: 18), onPressed: onMas),
-          PopupMenuButton<String>(
-            tooltip: 'Más opciones',
-            icon: const Icon(Icons.more_vert, size: 20),
-            onSelected: (v) {
-              switch (v) {
-                case 'variante':
-                  onVariante();
-                case 'dividir':
-                  onDividir();
-                case 'unir':
-                  onUnir();
-                case 'nota':
-                  onNota();
-                case 'quitar':
-                  onQuitar();
-                case 'eliminar':
-                  onEliminar();
-              }
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'variante', child: Text('Hacer variante (copia independiente)')),
-              PopupMenuItem(value: 'dividir', child: Text('Dividir la sección en dos')),
-              PopupMenuItem(value: 'unir', child: Text('Unir con otra sección')),
-              PopupMenuItem(value: 'nota', child: Text('Poner una nota')),
-              PopupMenuItem(value: 'quitar', child: Text('Quitar del orden')),
-              PopupMenuItem(value: 'eliminar', child: Text('Eliminar la sección')),
-            ],
+          Expanded(child: Align(alignment: Alignment.centerLeft, child: HeaderBadge(line: nombre.isEmpty ? '(texto inicial)' : nombre))),
+          SizedBox(
+            width: _anchoControles,
+            child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              IconButton(visualDensity: VisualDensity.compact, tooltip: 'Suena menos veces', icon: const Icon(Icons.remove, size: 18), onPressed: onMenos),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text('x$repeat', style: const TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              IconButton(visualDensity: VisualDensity.compact, tooltip: 'Suena más veces', icon: const Icon(Icons.add, size: 18), onPressed: onMas),
+              const SizedBox(width: 8),
+              PopupMenuButton<String>(
+                tooltip: 'Más opciones',
+                icon: const Icon(Icons.more_vert, size: 20),
+                onSelected: (v) {
+                  switch (v) {
+                    case 'variante':
+                      onVariante();
+                    case 'dividir':
+                      onDividir();
+                    case 'unir':
+                      onUnir();
+                    case 'nota':
+                      onNota();
+                    case 'quitar':
+                      onQuitar();
+                    case 'eliminar':
+                      onEliminar();
+                  }
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'variante', child: Text('Hacer variante (copia independiente)')),
+                  PopupMenuItem(value: 'dividir', child: Text('Dividir la sección en dos')),
+                  PopupMenuItem(value: 'unir', child: Text('Unir con otra sección')),
+                  PopupMenuItem(value: 'nota', child: Text('Poner una nota')),
+                  PopupMenuItem(value: 'quitar', child: Text('Quitar del orden')),
+                  PopupMenuItem(value: 'eliminar', child: Text('Eliminar la sección')),
+                ],
+              ),
+            ]),
           ),
         ]),
       ),
@@ -636,7 +647,7 @@ class _TarjetaDisponible extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         onTap: onAnadir,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 4, 8),
+          padding: const EdgeInsets.fromLTRB(8, 8, 10, 8),
           child: Row(children: [
             LongPressDraggable<String>(
               data: nombre,
@@ -644,22 +655,30 @@ class _TarjetaDisponible extends StatelessWidget {
               child: const Padding(padding: EdgeInsets.all(6), child: Icon(Icons.drag_handle, color: Colors.grey, size: 20)),
             ),
             const SizedBox(width: 6),
-            Flexible(child: HeaderBadge(line: nombre.isEmpty ? '(texto inicial)' : nombre)),
-            const Spacer(),
-            Text(pista, style: const TextStyle(fontSize: 10, color: Colors.grey)),
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              tooltip: 'Añadir al orden',
-              icon: const Icon(Icons.add_circle_outline, size: 20),
-              onPressed: onAnadir,
-            ),
-            PopupMenuButton<String>(
-              tooltip: 'Más opciones',
-              icon: const Icon(Icons.more_vert, size: 18),
-              onSelected: (v) {
-                if (v == 'eliminar') onEliminar();
-              },
-              itemBuilder: (_) => const [PopupMenuItem(value: 'eliminar', child: Text('Eliminar la sección'))],
+            Expanded(child: Align(alignment: Alignment.centerLeft, child: HeaderBadge(line: nombre.isEmpty ? '(texto inicial)' : nombre))),
+            SizedBox(
+              width: _anchoControles,
+              child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                Flexible(
+                  child: Text(pista, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                ),
+                const SizedBox(width: 10),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  tooltip: 'Añadir al orden',
+                  icon: const Icon(Icons.add_circle_outline, size: 20),
+                  onPressed: onAnadir,
+                ),
+                const SizedBox(width: 2),
+                PopupMenuButton<String>(
+                  tooltip: 'Más opciones',
+                  icon: const Icon(Icons.more_vert, size: 18),
+                  onSelected: (v) {
+                    if (v == 'eliminar') onEliminar();
+                  },
+                  itemBuilder: (_) => const [PopupMenuItem(value: 'eliminar', child: Text('Eliminar la sección'))],
+                ),
+              ]),
             ),
           ]),
         ),

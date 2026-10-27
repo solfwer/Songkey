@@ -141,10 +141,12 @@ Future<void> shareSetlistPdf(BuildContext context, Setlist list, List<Song> song
   try {
     final bytes = buildSetlistPdf(list, songs);
     final file = await tempPdfFile('${list.name}_setlist', bytes);
-    await Share.shareXFiles(
-      [XFile(file.path, mimeType: 'application/pdf')],
-      text: 'Setlist "${list.name}" · ${list.date}',
-      sharePositionOrigin: origin,
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(file.path, mimeType: 'application/pdf')],
+        text: 'Setlist "${list.name}" · ${list.date}',
+        sharePositionOrigin: origin,
+      ),
     );
   } catch (e) {
     if (context.mounted) {

@@ -181,10 +181,12 @@ Future<void> shareLibrary(BuildContext context, Store store) async {
     final dir = await getTemporaryDirectory();
     final file = File('${dir.path}/Songkey_biblioteca.songkey');
     await file.writeAsString(encodeLibrary(store.state));
-    await Share.shareXFiles(
-      [XFile(file.path, mimeType: 'application/octet-stream', name: 'Songkey_biblioteca.songkey')],
-      text: 'Mi biblioteca de Songkey (canciones y grupos)',
-      sharePositionOrigin: origin,
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(file.path, mimeType: 'application/octet-stream', name: 'Songkey_biblioteca.songkey')],
+        text: 'Mi biblioteca de Songkey (canciones y grupos)',
+        sharePositionOrigin: origin,
+      ),
     );
   } catch (e) {
     messenger.showSnackBar(SnackBar(content: Text('No se pudo compartir la biblioteca: $e')));
@@ -194,14 +196,13 @@ Future<void> shareLibrary(BuildContext context, Store store) async {
 /// Pide un archivo de biblioteca y añade sus canciones/grupos con vista previa.
 Future<void> importLibrary(BuildContext context, Store store) async {
   final messenger = ScaffoldMessenger.of(context);
-  final result = await FilePicker.platform.pickFiles(
+  final result = await FilePicker.pickFiles(
     type: FileType.custom,
     allowedExtensions: ['json', 'songkey'],
-    withData: true,
   );
-  if (result == null || result.files.isEmpty) return;
-  final file = result.files.single;
-  final bytes = file.bytes;
+  if (result.isEmpty) return;
+  final file = result.single;
+  final bytes = await file.readAsBytes();
   if (file == null || bytes == null) return;
 
   String raw;

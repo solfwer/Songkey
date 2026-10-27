@@ -209,7 +209,7 @@ class _EditorState extends State<_Editor> {
     return SingleChildScrollView(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         TextFormField(
-          key: ValueKey(widget.list.id + widget.list.name),
+          key: ValueKey(widget.list.id),
           initialValue: widget.list.name,
           style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
           decoration:
@@ -269,7 +269,7 @@ class _EditorState extends State<_Editor> {
             ]),
         const SizedBox(height: 8),
         TextFormField(
-          key: ValueKey(widget.list.id + widget.list.venue),
+          key: ValueKey(widget.list.id),
           initialValue: widget.list.venue,
           decoration: const InputDecoration(
               labelText: 'Lugar / ocasión', isDense: true),

@@ -1,6 +1,7 @@
 // Biblioteca de canciones: buscador + botón "+" para añadir canciones
 // (manualmente con ChordPro, desde un PDF o desde un documento ChordPro).
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -59,35 +60,121 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _importPdf() async {
-    final res = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf'], withData: true);
-    final file = res?.files.firstOrNull;
-    final bytes = file?.bytes;
-    if (file == null || bytes == null) return;
+    final res = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
+    final file = res.firstOrNull;
+    if (file == null) return;
     final base = file.name.replaceAll(RegExp(r'\.pdf$', caseSensitive: false), '');
+    Uint8List? bytes;
     try {
-      final conversion = const PdfToChordProService().convert(bytes, fallbackTitle: base);
-      if (!mounted) return;
-      if (conversion.chordPro.trim().isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('El PDF no trae letra con acordes que se pueda convertir')));
-        }
-        return;
-      }
-      if (!mounted) return;
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => PdfReviewPage(store: widget.store, conversion: conversion)));
+      bytes = await file.readAsBytes();
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se pudo leer el PDF (¿escaneado como imagen?)')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se pudo leer el archivo')));
       }
+      return;
     }
+
+    // Diálogo de carga para que no se congele la UI durante la conversión.
+    BuildContext? dialogo;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (c) {
+        dialogo = c;
+        return const AlertDialog(
+          content: Row(
+            children: [
+              SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+              SizedBox(width: 16),
+              Text('Leyendo el PDF…'),
+            ],
+          ),
+        );
+      },
+    );
+    // Ceder un frame para que el diálogo se pinte antes de empezar.
+    await Future.delayed(Duration.zero);
+
+    List<PdfConversion> conversions;
+    try {
+      // Se ejecuta en un isolate aparte: la UI no se bloquea aunque el PDF sea grande.
+      conversions = await const PdfToChordProService().convertAllAsync(bytes, fallbackTitle: base);
+    } catch (_) {
+      conversions = const [];
+    }
+    // Cerrar solo el diálogo: si el usuario ya lo cerró con "atrás", su
+    // contexto está desmontado y no se toca la pantalla que haya debajo.
+    if (dialogo != null && dialogo!.mounted) Navigator.of(dialogo!).pop();
+    if (!mounted) return;
+
+    if (conversions.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se pudo leer el PDF (¿escaneado como imagen?)')));
+      return;
+    }
+
+    // Una sola canción: flujo actual (revisar antes de guardar).
+    if (conversions.length == 1) {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => PdfReviewPage(store: widget.store, conversion: conversions.first),
+      ));
+      return;
+    }
+
+    // Varias canciones: mostrar diálogo de selección (mismo patrón que ChordPro múltiple).
+    final existingTitles = widget.store.state.songs.map((s) => s.title.trim().toLowerCase()).toSet();
+    final parsedSongs = conversions.map((c) {
+      return _ParsedSong(
+        title: c.title,
+        author: null,
+        key: c.suggestedKey ?? 'C',
+        bpm: c.bpm,
+        body: c.chordPro,
+        isDuplicate: existingTitles.contains(c.title.trim().toLowerCase()),
+        duplicateReason: existingTitles.contains(c.title.trim().toLowerCase())
+            ? 'Ya en la biblioteca'
+            : null,
+        selected: true,
+      );
+    }).toList();
+
+    if (!mounted) return;
+    final selected = await showDialog<List<_ParsedSong>>(
+      context: context,
+      builder: (_) => _MultiSongImportDialog(parsedSongs: parsedSongs),
+    );
+
+    if (selected == null || selected.isEmpty) return;
+
+    widget.store.update((state) {
+      final songs = [...state.songs, ...selected.map((p) => Song(
+        id: uid(),
+        title: p.title,
+        author: p.author,
+        key: p.key,
+        bpm: p.bpm,
+        body: p.body,
+      ))];
+      return AppState(groups: state.groups, songs: songs, setlists: state.setlists);
+    });
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Se añadieron ${selected.length} canciones')));
   }
 
   Future<void> _importChordPro() async {
-    final res = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['cho', 'chopro', 'chordpro', 'txt'], withData: true);
-    final file = res?.files.firstOrNull;
-    final bytes = file?.bytes;
+    final res = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['cho', 'chopro', 'chordpro', 'txt']);
+    final file = res.firstOrNull;
+    final bytes = await file?.readAsBytes();
     if (file == null || bytes == null) return;
-    final text = utf8.decode(bytes);
+    String text;
+    try {
+      text = utf8.decode(bytes);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('El archivo no está en UTF-8 y no se pudo leer.')));
+      }
+      return;
+    }
     final fileName = file.name.replaceAll(RegExp(r'\.[^.]+$'), '');
 
     // Dividir en canciones individuales
@@ -156,14 +243,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   /// Importa varios documentos ChordPro a la vez (varios archivos).
   Future<void> _importVariosChordpro() async {
-    final res = await FilePicker.platform.pickFiles(
+    final res = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['cho', 'chopro', 'chordpro', 'txt'],
-      withData: true,
-      allowMultiple: true,
     );
-    final files = res?.files;
-    if (files == null || files.isEmpty) return;
+    final files = res;
+    if (files.isEmpty) return;
 
     final parser = ChordProParser();
     final existingTitles = widget.store.state.songs.map((s) => s.title.trim().toLowerCase()).toSet();
@@ -171,9 +256,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final parsedSongs = <_ParsedSong>[];
 
     for (final file in files) {
-      final bytes = file.bytes;
+      final bytes = await file.readAsBytes();
       if (bytes == null) continue;
-      final text = utf8.decode(bytes);
+      String text;
+      try {
+        text = utf8.decode(bytes);
+      } catch (_) {
+        continue;
+      }
       final fileName = file.name.replaceAll(RegExp(r'\.[^.]+$'), '');
       final songTexts = splitChordProSongs(text);
       for (var i = 0; i < songTexts.length; i++) {

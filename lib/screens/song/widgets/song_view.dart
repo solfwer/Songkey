@@ -206,50 +206,139 @@ class SongLineView extends StatelessWidget {
         style: TextStyle(fontFamily: 'monospace', height: chordLineHeight),
       );
     }
-    // Margen entre columnas solo cuando la letra no separa ya: as dos
-    // acordes pegados ([A/C#][Am/C]) no se confunden, pero no se aade hueco
-    // fantasma donde la letra tiene su espacio ("mi padre es [C]Dios" se
-    // lee "mi padre es Dios", no "mi padre es  Dios").
-    bool necesitaMargen(SongLine linea, int i) {
-      if (i <= 0) return false;
-      final prev = linea[i - 1].text;
-      return prev.isEmpty || !RegExp(r'\s$').hasMatch(prev);
-    }
+    final hasChords = line.any((x) => x.chord != null);
+    // El texto se reparte en palabras: cada palabra es un solo hijo del Wrap,
+    // así un acorde caído a mitad de palabra no la parte ("se[Am]ñor" se ve
+    // "señor", con Am encima) y el salto de línea solo ocurre entre palabras.
+    final words = _groupWords(line);
 
-    return Wrap(spacing: 0, runSpacing: 2, children: [
-      for (var i = 0; i < line.length; i++)
-        Padding(
-          padding: EdgeInsets.only(
-            left: necesitaMargen(line, i) ? 3 : 0,
-            right: i < line.length - 1 && necesitaMargen(line, i + 1) ? 3 : 0,
-          ),
-          child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                    line[i].chord != null
-                        ? notateChord(transposeChord(line[i].chord!, semitones),
-                            american: american)
-                        : (line.any((x) => x.chord != null) ? ' ' : ''),
-                    style: TextStyle(
-                        fontSize: fontSize * chordScale,
-                        height: chordLineHeight,
-                        fontWeight: FontWeight.bold,
-                        color: const Color(0xFF5AD1E6),
-                        fontFamily: 'monospace')),
-                Text(line[i].text.isEmpty ? ' ' : line[i].text,
-                    style: TextStyle(
-                        fontSize: fontSize,
-                        height: lineHeight,
-                        color: Colors.white)),
-              ]),
-        ),
+    // Una palabra es una sola unidad de lectura: el lector de pantalla lee la
+    // línea entera, no cada trozo por separado.
+    return MergeSemantics(
+      child: Wrap(spacing: 0, runSpacing: 2, children: [
+        for (final word in words)
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            for (var i = 0; i < word.length; i++)
+              // Solo los acordes pegados sin letra entre ellos ([A/C#][Am/C])
+              // necesitan margen; dentro de una palabra no, o la partiría.
+              Padding(
+                padding: EdgeInsets.only(left: i > 0 && word[i - 1].text.isEmpty ? 3 : 0),
+                child: _wordPiece(word[i], hasChords),
+              ),
+          ]),
+      ]),
+    );
+  }
+
+  /// Una pieza de palabra: su trozo de letra con el acorde encima.
+  ///
+  /// El acorde se pinta flotando sobre la letra (no ocupa ancho), para que
+  /// `se[Am]ñor` se lea "señor" y el Am quede sobre la sílaba sin abrir hueco.
+  /// Si la pieza no tiene letra (acordes seguidos), el acorde sí ocupa su
+  /// propio ancho para que no se solapen.
+  Widget _wordPiece(Segment piece, bool hasChords) {
+    final chordStyle = TextStyle(
+        fontSize: fontSize * chordScale,
+        height: chordLineHeight,
+        fontWeight: FontWeight.bold,
+        color: const Color(0xFF5AD1E6),
+        fontFamily: 'monospace');
+    final textStyle = TextStyle(fontSize: fontSize, height: lineHeight, color: Colors.white);
+    final chord = piece.chord == null
+        ? null
+        : notateChord(transposeChord(piece.chord!, semitones), american: american);
+
+    if (piece.text.isEmpty) {
+      return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(chord ?? (hasChords ? ' ' : ''), style: chordStyle),
+        Text(' ', style: textStyle),
+      ]);
+    }
+    return Stack(clipBehavior: Clip.none, children: [
+      Padding(
+        padding: EdgeInsets.only(top: fontSize * chordScale * chordLineHeight),
+        child: Text(piece.text, style: textStyle),
+      ),
+      if (chord != null) Positioned(top: 0, left: 0, child: Text(chord, style: chordStyle)),
     ]);
   }
 }
 
-/// Encabezado de sección (badge de color + etiqueta).
+/// Reparte la línea en palabras: cada palabra es la lista de piezas (acorde +
+/// trozo de letra) que se pintan sin cortes entre ellas.
+///
+/// El espacio que separa dos palabras se queda al final de la primera, para
+/// que el Wrap tenga dónde partir la línea sin romper ninguna palabra.
+List<List<Segment>> _groupWords(SongLine line) {
+  final words = <List<Segment>>[];
+  var word = <Segment>[];
+  String? pending;
+
+  void flush({bool trailingSpace = false}) {
+    if (pending != null) {
+      word.add(Segment(chord: pending));
+      pending = null;
+    }
+    if (word.isEmpty) return;
+    if (trailingSpace) word.add(Segment(text: ' '));
+    words.add(word);
+    word = <Segment>[];
+  }
+
+  for (final seg in line) {
+    if (seg.chord != null) {
+      // Un acorde sin letra detrás (dos acordes seguidos) ocupa su pieza.
+      if (pending != null) word.add(Segment(chord: pending));
+      pending = seg.chord;
+    }
+    final text = seg.text;
+    var start = 0;
+    for (var i = 0; i < text.length; i++) {
+      if (text[i].trim().isEmpty) {
+        if (i > start) {
+          word.add(Segment(chord: pending, text: text.substring(start, i)));
+          pending = null;
+          flush(trailingSpace: true);
+        } else if (pending != null) {
+          // `[C] Hola`: el acorde aún no tiene letra, así que el espacio no
+          // cierra nada; se queda pegado a la palabra que viene.
+        } else if (word.isEmpty) {
+          word.add(Segment(text: ' ')); // sangría del principio, se conserva
+        }
+        start = i + 1;
+      }
+    }
+    if (start < text.length) {
+      word.add(Segment(chord: pending, text: text.substring(start)));
+      pending = null;
+    }
+  }
+  flush();
+  return words;
+}
+
+/// Etiqueta corta de sección para la cabecera ("INTRO:", "VERSO 1:", "CORO:").
+String simpleSectionLabel(String label) {
+  final l = label.trim();
+  if (l.isEmpty) return '';
+  // "pre coro" tiene que ir antes que "coro" o se queda en CORO.
+  final m = RegExp(
+    r'(INTRODUCCI[OÓ]N|PRE[\s-]?CORO|VERSO|CORO|PUENTE|INSTRUMENTAL|INTERLUDIO|FINAL|OUTRO|TAG|CODA|TRANSICI[OÓ]N|INTRO)\s*(\d*)',
+    caseSensitive: false,
+  ).firstMatch(l);
+  if (m == null) return '${l.split(RegExp(r'\s+')).first.toUpperCase()}:';
+
+  final clave = m.group(1)!.toUpperCase();
+  final nombre = clave.startsWith('PRE')
+      ? 'PRE-CORO'
+      : clave.startsWith('INTROD')
+          ? 'INTRO'
+          : clave;
+  final num = m.group(2) ?? '';
+  return '$nombre${num.isEmpty ? '' : ' $num'}:';
+}
+
+/// Encabezado de sección (badge de color + etiqueta simple en rojo).
 class SectionHeader extends StatelessWidget {
   final Section sec;
   final double fontSize;
@@ -264,27 +353,30 @@ class SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final simple = simpleSectionLabel(sec.label);
+    final esOscuro = Theme.of(context).brightness == Brightness.dark;
     return Row(children: [
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
         decoration: BoxDecoration(
-            color: sectionKindColor(sec.kind).withValues(alpha: 0.2),
+            color: AppColors.destructive.withValues(alpha: esOscuro ? 0.25 : 0.15),
             borderRadius: BorderRadius.circular(6)),
         child: Text(sec.abbr,
             style: TextStyle(
                 fontSize: fontSize,
                 fontWeight: FontWeight.bold,
-                color: sectionKindColor(sec.kind))),
+                color: AppColors.destructive)),
       ),
       SizedBox(width: gap),
       Expanded(
         child: Text(
-          sec.label.toUpperCase(),
+          simple,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-              color: Colors.grey,
+              color: AppColors.destructive,
               fontSize: fontSize,
+              fontWeight: FontWeight.bold,
               letterSpacing: letterSpacing),
         ),
       ),
@@ -518,22 +610,6 @@ class AutoFitSongBody extends StatelessWidget {
           (hasChords ? _chordLineHeight(fs) : 0) + n * _lyricLineHeight(fs) + 2;
     }
     return h + 20; // margen entre secciones
-  }
-
-  /// Reparte las secciones en [columns] columnas equilibradas por altura.
-  List<List<Section>> _balance(int columns, double width, double fs) {
-    if (columns <= 1) return [sections];
-    final cols = List.generate(columns, (_) => <Section>[]);
-    final heights = List.filled(columns, 0.0);
-    for (final sec in sections) {
-      var target = 0;
-      for (var i = 1; i < columns; i++) {
-        if (heights[i] < heights[target]) target = i;
-      }
-      cols[target].add(sec);
-      heights[target] += _sectionHeight(sec, width, fs);
-    }
-    return cols;
   }
 
   /// Mejor configuracin (fuente ms grande, y a igual tamao menos columnas)

@@ -129,11 +129,32 @@ class _VisualChordEditorState extends State<VisualChordEditor> {
       charIdx = textPainter.getPositionForOffset(adjusted).offset.clamp(0, line.length);
     }
 
+    final prevSelectedIdx = _selectedChordIdx;
+
     setState(() {
       _selectedLine = lineIdx;
       _tapCharIndex = charIdx;
       _selectedChordIdx = _findChordAt(lineIdx, charIdx);
     });
+
+    // Opción B: si ya hay un acorde marcado y el usuario toca un punto de la
+    // letra que NO tiene acorde, mueve el acorde marcado a ese punto en vez
+    // de insertar otro. Si toca donde ya hay acorde, simplemente lo selecciona.
+    if (prevSelectedIdx >= 0 &&
+        prevSelectedIdx < _chords.length &&
+        _selectedChordIdx < 0 &&
+        _chords[prevSelectedIdx].lineIndex != lineIdx) {
+      _saveSnapshot();
+      setState(() {
+        final moved = _chords[prevSelectedIdx].copyWith(lineIndex: lineIdx, charIndex: charIdx);
+        _chords[prevSelectedIdx] = moved;
+        _chords.sort((a, b) => a.lineIndex != b.lineIndex ? a.lineIndex.compareTo(b.lineIndex) : a.charIndex.compareTo(b.charIndex));
+        _selectedChordIdx = _chords.indexWhere((c) => c.lineIndex == moved.lineIndex && c.charIndex == moved.charIndex && c.chord == moved.chord);
+        _selectedLine = lineIdx;
+        _tapCharIndex = charIdx;
+      });
+      _notifyChange();
+    }
   }
 
   int _findChordAt(int lineIdx, int charIdx) {
@@ -255,7 +276,10 @@ class _VisualChordEditorState extends State<VisualChordEditor> {
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
-                      const Padding(padding: EdgeInsets.only(left: 8, right: 4), child: Text('Mover acorde / linea:', style: TextStyle(color: Colors.grey, fontSize: 12))),
+                      const Padding(
+                        padding: EdgeInsets.only(left: 8, right: 4),
+                        child: Text('Mover acorde / linea:', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      ),
                       IconButton(icon: const Icon(Icons.chevron_left), tooltip: 'Mover acorde ←', visualDensity: VisualDensity.compact, onPressed: _selectedChordIdx >= 0 ? () => _nudgeSelected(-1) : null),
                       IconButton(icon: const Icon(Icons.chevron_right), tooltip: 'Mover acorde →', visualDensity: VisualDensity.compact, onPressed: _selectedChordIdx >= 0 ? () => _nudgeSelected(1) : null),
                       Container(width: 1, height: 24, margin: const EdgeInsets.symmetric(horizontal: 6), color: Colors.grey),
@@ -332,6 +356,7 @@ class _VisualChordEditorState extends State<VisualChordEditor> {
                           line: line,
                           chords: lineChords,
                           selectedIdx: _selectedChordIdx >= 0 && _selectedChordIdx < _chords.length && _chords[_selectedChordIdx].lineIndex == i ? _chords.indexOf(_chords[_selectedChordIdx]) : -1,
+                          cursorIndex: _selectedLine == i ? _tapCharIndex : null,
                           style: mono,
                           onChordTap: (chordIdx) {
                             setState(() {
@@ -360,18 +385,25 @@ class _LyricLineWithChords extends StatelessWidget {
   final String line;
   final List<PositionedChord> chords;
   final int selectedIdx; // ndice dentro de `chords`
+  final int? cursorIndex; // posición del cursor de inserción en la línea, si aplica
   final TextStyle style;
   final ValueChanged<int> onChordTap;
-  const _LyricLineWithChords({required this.line, required this.chords, required this.selectedIdx, required this.style, required this.onChordTap});
+  const _LyricLineWithChords({
+    required this.line,
+    required this.chords,
+    required this.selectedIdx,
+    this.cursorIndex,
+    required this.style,
+    required this.onChordTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    if (chords.isEmpty) return Text(line, style: style);
-
     final spans = <InlineSpan>[];
     int last = 0;
-    for (var i = 0; i < chords.length; i++) {
-      final c = chords[i];
+    final sortedChords = List<PositionedChord>.from(chords)..sort((a, b) => a.charIndex.compareTo(b.charIndex));
+
+    for (final c in sortedChords) {
       final idx = c.charIndex.clamp(0, line.length);
       if (idx > last) {
         spans.add(TextSpan(text: line.substring(last, idx), style: style));
@@ -380,26 +412,39 @@ class _LyricLineWithChords extends StatelessWidget {
         alignment: PlaceholderAlignment.baseline,
         baseline: TextBaseline.alphabetic,
         child: Padding(
-          // Margen a los lados: as dos acordes seguidos se pueden separar y
-          // cada uno tiene su sitio para tocarlo.
           padding: const EdgeInsets.symmetric(horizontal: 4),
           child: GestureDetector(
-            onTap: () => onChordTap(i),
+            onTap: () => onChordTap(sortedChords.indexOf(c)),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: selectedIdx == i ? AppColors.accent : AppColors.primary,
-                borderRadius: BorderRadius.circular(4),
-                boxShadow: selectedIdx == i ? [BoxShadow(color: AppColors.accent.withValues(alpha: 0.5), blurRadius: 4)] : null,
+                color: selectedIdx == sortedChords.indexOf(c) ? AppColors.accent : AppColors.primary,
+                borderRadius: BorderRadius.circular(6),
+                boxShadow: selectedIdx == sortedChords.indexOf(c)
+                    ? [BoxShadow(color: AppColors.accent.withValues(alpha: 0.5), blurRadius: 4)]
+                    : null,
               ),
-              child: Text(c.chord, style: style.copyWith(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
+              child: Text(
+                c.chord,
+                style: style.copyWith(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+              ),
             ),
           ),
         ),
       ));
       last = idx;
     }
-    if (last < line.length) spans.add(TextSpan(text: line.substring(last), style: style));
+
+    // Marcador de inserción (┃) en la posición del cursor, si aplica.
+    if (cursorIndex != null && cursorIndex! >= 0 && cursorIndex! <= line.length) {
+      final pos = cursorIndex!.clamp(0, line.length);
+      if (pos > last) spans.add(TextSpan(text: line.substring(last, pos), style: style));
+      spans.add(const TextSpan(text: '┃', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.primary)));
+      if (pos < line.length) spans.add(TextSpan(text: line.substring(pos), style: style));
+    } else if (last < line.length) {
+      spans.add(TextSpan(text: line.substring(last), style: style));
+    }
+
     return Text.rich(TextSpan(children: spans, style: style));
   }
 }

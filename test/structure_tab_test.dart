@@ -120,6 +120,27 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('los controles quedan en la misma columna aunque el chip mida distinto', (tester) async {
+    await _abrir(tester, orden: const ['VERSO 1', 'CORO']);
+
+    // Dos tarjetas del orden con etiquetas de largo distinto: el grupo
+    // "− x1 + ⋮" debe empezar en la misma x en las dos.
+    final menos = find.byTooltip('Suena menos veces');
+    final mas = find.byTooltip('Suena más veces');
+    expect(menos, findsNWidgets(2));
+    expect(tester.getTopLeft(mas.at(1)).dx, tester.getTopLeft(mas.at(0)).dx);
+    expect(tester.getTopLeft(menos.at(1)).dx, tester.getTopLeft(menos.at(0)).dx);
+
+    // Y en "Secciones", el "+" de todas las filas.
+    final anadir = find.byIcon(Icons.add_circle_outline);
+    expect(anadir, findsNWidgets(4));
+    final xs = [for (var i = 0; i < 4; i++) tester.getTopLeft(anadir.at(i)).dx];
+    for (final x in xs) {
+      expect(x, xs.first);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
   test('el orden de toque se guarda con las repeticiones', () {
     final secs = sectionsInOrder(cuerpo, ['VERSO 1', 'CORO', 'CORO']);
     expect(secs.map((s) => s.label).toList(), ['VERSO 1', 'CORO', 'CORO']);

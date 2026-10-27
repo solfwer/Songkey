@@ -14,6 +14,7 @@ import '../../../models/song.dart';
 import '../../../data/chord_parser.dart';
 import 'compact_sections.dart';
 import 'song_view.dart';
+import '../../../theme.dart';
 
 /// Tamao mnimo que se considera legible.
 const double _minFontSize = 10;
@@ -174,28 +175,36 @@ class _CompactSongViewState extends State<CompactSongView> {
   }
 }
 
-/// Cabecera de seccin con el badge de color (igual que en la vista normal).
+/// Cabecera de seccion con el badge de color (igual que en la vista normal).
 class _CabeceraCompacta extends StatelessWidget {
   final CompactSection sec;
   const _CabeceraCompacta({required this.sec});
 
   @override
   Widget build(BuildContext context) {
-    final color = sectionKindColor(sec.kind);
     final abbr = _abreviatura(sec.label);
+    final simple = simpleSectionLabel(sec.label);
+    final esOscuro = Theme.of(context).brightness == Brightness.dark;
     return Row(children: [
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-        decoration: BoxDecoration(color: color.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(6)),
-        child: Text(abbr, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: color)),
+        decoration: BoxDecoration(
+            color: AppColors.destructive.withValues(alpha: esOscuro ? 0.25 : 0.15),
+            borderRadius: BorderRadius.circular(6)),
+        child: Text(abbr,
+            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.destructive)),
       ),
       const SizedBox(width: 8),
       Expanded(
         child: Text(
-          sec.label.toUpperCase(),
+          simple,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: Colors.grey, fontSize: 10, letterSpacing: 1.5),
+          style: const TextStyle(
+              color: AppColors.destructive,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.5),
         ),
       ),
     ]);
@@ -203,7 +212,7 @@ class _CabeceraCompacta extends StatelessWidget {
 
   String _abreviatura(String label) {
     final secs = parseSong(label);
-    if (secs.isNotEmpty && secs.first.abbr != '•' && secs.first.abbr.isNotEmpty) {
+    if (secs.isNotEmpty && secs.first.abbr != 'â€¢' && secs.first.abbr.isNotEmpty) {
       return secs.first.abbr.toLowerCase();
     }
     final t = label.trim();

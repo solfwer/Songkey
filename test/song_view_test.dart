@@ -58,9 +58,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     // El coro sale una sola vez, con su "x2".
-    expect(find.text('CORO'), findsOneWidget);
+    expect(find.textContaining('CORO'), findsOneWidget);
     expect(find.text('x2'), findsOneWidget);
-    expect(find.text('VERSO 1'), findsOneWidget);
+    expect(find.textContaining('VERSO 1'), findsOneWidget);
   });
 
   testWidgets('auto-ajuste: cancin corta cabe en una sola pagina', (tester) async {
@@ -133,7 +133,10 @@ void main() {
     await tester.tap(find.byIcon(Icons.tune));
     await tester.pumpAndSettle();
     expect(config.capoFor(song.id), 0);
-    await tester.tap(find.text('3'));
+    // Open the dropdown first, then select "Traste 3"
+    await tester.tap(find.byType(DropdownButtonFormField<int>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Traste 3').last);
     await tester.pumpAndSettle();
     expect(config.capoFor(song.id), 3);
   });

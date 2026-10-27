@@ -46,6 +46,19 @@ void main() {
     });
   });
 
+  group('sin coordenadas (texto en modo layout)', () {
+    test('los acordes van al principio, en orden', () {
+      const l = PdfLine(
+        words: [PdfWord(text: 'Hola mundo', left: 0, top: 0, right: 0, bottom: 0)],
+        positioned: false,
+      );
+      final out = placeChordsOnLyric(chordsOf(chords('D G')), l);
+      expect(out.lyric, 'Hola mundo');
+      expect(out.chords.map((c) => c.chord).toList(), ['D', 'G']);
+      expect(out.chords.map((c) => c.at).toList(), [0, 0]);
+    });
+  });
+
   group('acorde en medio de palabra', () {
     test('respeta el punto exacto (frent[C#m]e)', () {
       // "Da un paso al frente": el acorde va justo antes de la "e" final.

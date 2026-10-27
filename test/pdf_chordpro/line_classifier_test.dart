@@ -26,6 +26,10 @@ void main() {
       expect(chordRatio('F  G  Em  Am'), 1.0);
     });
 
+    test('las marcas sin texto no cuentan como token', () {
+      expect(chordRatio('D | G //'), 1.0);
+    });
+
     test('linea de letra da 0', () {
       expect(chordRatio('Da un paso al frente'), 0.0);
     });
@@ -84,6 +88,26 @@ void main() {
       expect(matchHeader('Verso que no es encabezado'), isNull);
       expect(matchHeader('Puente de la cancion'), isNull);
     });
+
+    test('encabezado pegado a la letra (como en el PDF)', () {
+      final h = matchHeader('CORO Fuimos rescatados del pecado');
+      expect(h!.directive, 'chorus');
+      expect(h.label, 'CORO');
+      expect(h.rest, 'Fuimos rescatados del pecado');
+    });
+
+    test('el acorde que el PDF pinta encima no tapa la etiqueta', () {
+      final h = matchHeader('G TAG No nos cansaremos');
+      expect(h!.directive, 'final');
+      expect(h.label, 'TAG');
+      expect(h.rest, 'No nos cansaremos');
+    });
+
+    test('TAG conserva su nombre; outro y coda son FINAL', () {
+      expect(matchHeader('TAG')!.label, 'TAG');
+      expect(matchHeader('OUTRO')!.label, 'FINAL');
+      expect(matchHeader('CODA')!.label, 'FINAL');
+    });
   });
 
   group('clasificacion de lineas', () {
@@ -103,6 +127,47 @@ void main() {
 
     test('vacia', () {
       expect(classifyLine(line('')).kind, LineKind.empty);
+    });
+
+    test('umbral del 70%: 3 acordes de 4 tokens es linea de acordes', () {
+      expect(classifyLine(line('C@0 G@20 Am@40 letra')).kind, LineKind.chords);
+    });
+
+    test('umbral del 70%: 2 acordes de 5 tokens sigue siendo letra', () {
+      expect(classifyLine(line('C@0 G@20 letra mas palabras')).kind, LineKind.lyric);
+    });
+
+    test('umbral del 70%: 4 acordes de 5 tokens (80%) es linea de acordes', () {
+      expect(classifyLine(line('C@0 G@20 Am@40 F@60 palabra')).kind, LineKind.chords);
+    });
+  });
+
+  group('secciones con repeticion (xN)', () {
+    test('(INTRO x2) es introduccion con repeticion en la etiqueta', () {
+      final h = matchHeader('(INTRO x2)');
+      expect(h, isNotNull);
+      expect(h!.directive, 'introduccion');
+      expect(h.label, 'INTRODUCCIÓN x2');
+      expect(h.rest, isEmpty);
+    });
+
+    test('CORO x2 es coro con repeticion', () {
+      final h = matchHeader('CORO x2');
+      expect(h!.directive, 'chorus');
+      expect(h.label, 'CORO x2');
+    });
+
+    test('VERSO 2 x3 conserva numero y repeticion', () {
+      final h = matchHeader('VERSO 2 x3');
+      expect(h!.directive, 'verse');
+      expect(h.label, 'VERSO 2 x3');
+    });
+
+    test('INTRODUCCION: C#m A E B guarda progresion en rest', () {
+      final h = matchHeader('INTRODUCCION: C#m A E B');
+      expect(h!.directive, 'introduccion');
+      expect(h.label, 'INTRODUCCIÓN');
+      expect(h.rest, 'C#m A E B');
     });
   });
 }

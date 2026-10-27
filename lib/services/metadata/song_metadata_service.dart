@@ -43,6 +43,10 @@ class SongMetadataService {
     required Map<String, String?> existing, // campo → valor actual (null si vacío)
     bool consultarOnline = true,
   }) async {
+    // Toque manual del botón "Auto": siempre reintenta, aunque el título
+    // tenga caché negativa de un intento fallido previo.
+    _negativeCache.remove(titulo.trim().toLowerCase());
+
     var suggestion = SongMetadataSuggestion();
 
     // 1. Offline: detección de tonalidad por acordes.

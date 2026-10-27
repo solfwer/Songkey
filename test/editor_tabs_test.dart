@@ -66,7 +66,7 @@ void main() {
     // Se ven los encabezados de seccin y la letra.
     expect(find.textContaining('VERSO 1'), findsOneWidget);
 
-    expect(find.text('CORO'), findsOneWidget);
+    expect(find.textContaining('CORO'), findsOneWidget);
     expect(find.textContaining('Hola'), findsWidgets);
     expect(tester.takeException(), isNull);
   });

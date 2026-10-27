@@ -5,7 +5,6 @@
 // visible en el AppBar.
 import 'package:flutter/material.dart';
 
-import '../../data/chord_parser.dart';
 import '../../data/store.dart';
 import '../../models/app_state.dart';
 import '../../models/song.dart';
@@ -29,11 +28,13 @@ class _PdfReviewPageState extends State<PdfReviewPage> {
   late final PageController _page = PageController();
   int _pageIndex = 0;
 
-  /// Título y tono: se editan en la página 1 (Datos) y se muestran en la 3 (Vista previa).
+  /// Título, tono y BPM: se editan en la página 1 (Datos) y se muestran en la 3 (Vista previa).
   late final TextEditingController _title = TextEditingController(text: widget.conversion.title);
   late final TextEditingController _key = TextEditingController(text: widget.conversion.suggestedKey ?? 'C');
   /// Cuerpo ChordPro: se edita en la página 2 (Editor) y se previsualiza en la 3.
   late final TextEditingController _body = TextEditingController(text: widget.conversion.chordPro);
+  /// BPM (opcional, vacío = no se especifica).
+  late final TextEditingController _bpmCtrl = TextEditingController(text: widget.conversion.bpm != null ? '${widget.conversion.bpm}' : '');
   /// Orden de toque: se edita en la página 4 (Estructura) y se usa en la 3.
   List<String>? _structure;
 
@@ -95,6 +96,7 @@ class _PdfReviewPageState extends State<PdfReviewPage> {
       id: DateTime.now().microsecondsSinceEpoch.toString(),
       title: titulo,
       key: _key.text.trim().isEmpty ? 'C' : _key.text.trim(),
+      bpm: int.tryParse(_bpmCtrl.text.trim()),
       body: _body.text,
       groupId: widget.initialGroupId,
       structure: _structure,
@@ -126,6 +128,28 @@ class _PdfReviewPageState extends State<PdfReviewPage> {
             child: TextField(
               controller: _key,
               decoration: const InputDecoration(labelText: 'Tono', isDense: true),
+            ),
+          ),
+        ]),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+        child: Row(children: [
+          SizedBox(
+            width: 110,
+            child: TextField(
+              controller: _bpmCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'BPM', isDense: true),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              _bpmCtrl.text.isNotEmpty && int.tryParse(_bpmCtrl.text) == null
+                  ? 'Ingresa solo números'
+                  : '',
+              style: const TextStyle(color: Colors.redAccent, fontSize: 11),
             ),
           ),
         ]),
@@ -177,6 +201,7 @@ class _PdfReviewPageState extends State<PdfReviewPage> {
           controller: _body,
           wide: false,
           warningLines: _warningLines,
+          songKey: _key.text,
         ),
       ),
     ]);
@@ -276,3 +301,4 @@ class _PdfReviewPageState extends State<PdfReviewPage> {
     );
   }
 }
+

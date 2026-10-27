@@ -38,6 +38,7 @@ class ChordQuickBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final grupos = quickBarChords(songKey, selected: selectedChord);
+    final notas = grupos.scale;
     return Container(
       decoration: BoxDecoration(color: AppColors.card, border: Border(bottom: BorderSide(color: Colors.grey[800]!))),
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -90,6 +91,15 @@ class ChordQuickBar extends StatelessWidget {
               ],
             ),
           ),
+          // Fila de notas de la escala como referencia tonal.
+          if (notas.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 4, 10, 0),
+              child: Text(
+                'Escala:  ${notas.join('   ')}',
+                style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+            ),
         ],
       ),
     );
@@ -104,7 +114,7 @@ class _GrupoLabel extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6),
         child: Center(
-          child: Text(texto.toUpperCase(), style: const TextStyle(fontSize: 8, letterSpacing: 1, color: Colors.white38)),
+          child: Text(texto.toUpperCase(), style: TextStyle(fontSize: 8, letterSpacing: 1, color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.6))),
         ),
       );
 }
@@ -127,13 +137,13 @@ class _ChipAcorde extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: marcado ? AppColors.primary.withValues(alpha: 0.85) : Colors.white10,
+            color: marcado ? AppColors.primary.withValues(alpha: 0.85) : Theme.of(context).colorScheme.surfaceContainerLowest.withValues(alpha: 0.5),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: marcado ? AppColors.primary : Colors.white24),
+            border: Border.all(color: marcado ? AppColors.primary : Theme.of(context).colorScheme.outlineVariant),
           ),
           child: Text(
             acorde,
-            style: TextStyle(fontFamily: 'monospace', fontSize: 13, fontWeight: FontWeight.bold, color: marcado ? Colors.white : Colors.white70),
+            style: TextStyle(fontFamily: 'monospace', fontSize: 13, fontWeight: FontWeight.bold, color: marcado ? Colors.white : Theme.of(context).colorScheme.onSurface),
           ),
         ),
       ),

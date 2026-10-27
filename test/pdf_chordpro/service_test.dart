@@ -238,4 +238,40 @@ void main() {
       expect(avisos.first.message, contains('escaneado'));
     });
   });
+
+  group('titulo y mezcla por posicion', () {
+    test('titulo en mayusculas sin tamaño distinto no se vuelve verso', () {
+      final lines = <PdfLine>[
+        txt('CIELO EN LA TIERRA', top: 60, fontSize: 12),
+        txt('VERSO 1', top: 100),
+        txt('El cielo y la tierra creó', top: 120),
+      ];
+      final res = service.buildFromLines(lines);
+      expect(res.title, 'CIELO EN LA TIERRA');
+      expect(res.chordPro, contains('{title: CIELO EN LA TIERRA}'));
+      // La línea del título no cuela como primer verso.
+      expect(res.chordPro, isNot(contains('{start_of_verse: VERSO 1}\nCIELO')));
+      expect(res.chordPro, contains('El cielo y la tierra creó'));
+    });
+
+    test('acorde se coloca sobre la sílaba cuya X es la más cercana (glifos)', () {
+      // 'Hola mundo' con charWidth 8: H=0 o=8 l=16 a=24 ' '=32 m=40 u=48 n=56 d=64 o=72
+      final lines = pareja('G@16', 'Hola mundo', top: 100, charWidth: 8, left: 0);
+      final res = service.buildFromLines(lines);
+      expect(res.chordPro, contains('Ho[G]la mundo'));
+    });
+
+    test('acorde sin letra debajo es línea de compases', () {
+      final lines = <PdfLine>[
+        txt('INTRO x2', top: 100),
+        chordLine('C#m@0 A@40 E@80 B@120', top: 116),
+        txt('VERSO 1', top: 160),
+        txt('letra de prueba', top: 180),
+      ];
+      final res = service.buildFromLines(lines);
+      expect(res.chordPro, contains('{start_of_introduccion: INTRODUCCIÓN x2}'));
+      expect(res.chordPro, contains('[C#m] | [A] | [E] | [B]'));
+      expect(res.chordPro, contains('letra de prueba'));
+    });
+  });
 }

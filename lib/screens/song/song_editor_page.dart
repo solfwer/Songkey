@@ -7,7 +7,6 @@
 import 'package:flutter/material.dart';
 
 import '../../data/chordpro.dart';
-import '../../data/format.dart';
 import '../../data/store.dart';
 import '../../models/app_state.dart';
 import '../../models/setlist.dart';
@@ -42,8 +41,6 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
   late final TextEditingController key;
   late final TextEditingController bpm;
   late final TextEditingController author;
-  late final TextEditingController style;
-  late final TextEditingController duration;
   late final TextEditingController body;
   late final TextEditingController timeSignature;
   String? groupId;
@@ -112,13 +109,29 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
         if (sugerencia.bpm != null && bpm.text.trim().isEmpty) {
           bpm.text = sugerencia.bpm!.value.toString();
         }
-        if (sugerencia.artist != null && author.text.trim().isEmpty) {
-          author.text = sugerencia.artist!.value;
-        }
         if (sugerencia.timeSignature != null && timeSignature.text.trim().isEmpty) {
           timeSignature.text = sugerencia.timeSignature!.value;
         }
       });
+
+      // Artista: si hay varios candidatos con artistas distintos, deja que el
+      // usuario elija en vez de auto-completar con uno posiblemente erróneo.
+      if (author.text.trim().isEmpty && sugerencia.candidates.isNotEmpty) {
+        final artistasDistintos = sugerencia.candidates
+            .where((c) => c.artist != null && c.artist!.trim().isNotEmpty)
+            .map((c) => c.artist!.trim())
+            .toSet();
+        if (artistasDistintos.length > 1) {
+          if (mounted) {
+            final elegido = await _seleccionarArtista(sugerencia.candidates);
+            if (elegido != null && elegido.trim().isNotEmpty) {
+              author.text = elegido;
+            }
+          }
+        } else if (sugerencia.artist != null) {
+          author.text = sugerencia.artist!.value;
+        }
+      }
 
       if (mounted) {
         final partes = <String>[];
@@ -147,8 +160,6 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
     key = TextEditingController(text: widget.song?.key ?? 'C');
     bpm = TextEditingController(text: widget.song?.bpm?.toString() ?? '');
     author = TextEditingController(text: widget.song?.author ?? '');
-    style = TextEditingController(text: widget.song?.style ?? '');
-    duration = TextEditingController(text: _durationLabel(widget.song?.durationSec));
     body = TextEditingController(text: widget.song?.body ?? widget.initialBody ?? '');
     timeSignature = TextEditingController(text: widget.song?.timeSignature ?? '');
     // Servicio de metadatos: GetSongBPM key via --dart-define (vacío = sin API online).
@@ -166,16 +177,11 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
     body.addListener(_onBodyTextChanged);
   }
 
-  static String _durationLabel(int? sec) {
-    if (sec == null || sec <= 0) return '';
-    return '${sec ~/ 60}:${(sec % 60).toString().padLeft(2, '0')}';
-  }
-
   @override
   void dispose() {
     _tabCtrl.dispose();
     body.removeListener(_onBodyTextChanged);
-    for (final c in [title, key, bpm, author, style, duration, body, timeSignature]) {
+    for (final c in [title, key, bpm, author, body, timeSignature]) {
       c.dispose();
     }
     super.dispose();
@@ -268,14 +274,6 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
                 Expanded(child: TextField(controller: bpm, decoration: InputDecoration(labelText: 'BPM', suffixIcon: _TapTempoIcon(controller: bpm)), keyboardType: TextInputType.number)),
                 const SizedBox(width: 12),
                 Expanded(child: TextField(controller: timeSignature, decoration: const InputDecoration(labelText: 'Compás (ej. 4/4)'))),
-                const SizedBox(width: 12),
-                Expanded(child: DropdownButtonFormField<String?>(initialValue: groupId, isExpanded: true, decoration: const InputDecoration(labelText: 'Grupo'), items: [null, ...groups.map((g) => g.id)].map((id) => DropdownMenuItem(value: id, child: Text(id == null ? 'Sin grupo' : groups.firstWhere((g) => g.id == id).name, overflow: TextOverflow.ellipsis))).toList(), onChanged: (v) => setState(() => groupId = v))),
-              ]),
-              const SizedBox(height: 12),
-              Row(children: [
-                Expanded(child: TextField(controller: style, decoration: const InputDecoration(labelText: 'Estilo (opcional)'))),
-                const SizedBox(width: 12),
-                Expanded(child: TextField(controller: duration, decoration: const InputDecoration(labelText: 'Duración (3:45)'), keyboardType: TextInputType.text)),
               ]),
               const SizedBox(height: 24),
               PdfImportButton(store: widget.store, initialGroupId: groupId),
@@ -337,6 +335,55 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
     } else if (salir == null) {
       save();
     }
+  }
+
+  /// Muestra un diálogo para que el usuario elija el artista correcto entre
+  /// los candidatos devueltos por las APIs. Devuelve el artista elegido o null
+  /// si canceló.
+  Future<String?> _seleccionarArtista(List<SongCandidate> candidates) async {
+    final conArtista = candidates
+        .where((c) => c.artist != null && c.artist!.trim().isNotEmpty)
+        .toList();
+    if (conArtista.isEmpty) return null;
+
+    // Elimina duplicados manteniendo el orden.
+    final vistos = <String>{};
+    final unicos = <SongCandidate>[];
+    for (final c in conArtista) {
+      final a = c.artist!.trim();
+      if (vistos.add(a)) unicos.add(c);
+    }
+
+    return showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Elige el artista'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: unicos.length,
+            itemBuilder: (_, i) {
+              final c = unicos[i];
+              final subtitle = c.source == 'getsongbpm' ? 'GetSongBPM' : 'MusicBrainz';
+              return ListTile(
+                title: Text(c.artist!),
+                subtitle: Text('${c.title} (${subtitle})', style: const TextStyle(fontSize: 11)),
+                onTap: () => Navigator.pop(_, c.artist),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(_), child: const Text('Cancelar')),
+          if (unicos.length == 1)
+            FilledButton(
+              onPressed: () => Navigator.pop(_, unicos.first.artist),
+              child: const Text('Usar'),
+            ),
+        ],
+      ),
+    );
   }
 
   /// Deja el cuerpo como lo escribi el usuario y solo pone al principio las
@@ -402,8 +449,8 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
       bpm: int.tryParse(bpmText),
       groupId: groupId,
       body: bodyCanonico,
-      style: style.text.trim().isEmpty ? null : style.text.trim(),
-      durationSec: parseDuration(duration.text),
+      style: widget.song?.style,
+      durationSec: widget.song?.durationSec,
       lastOpenedAt: widget.song?.lastOpenedAt,
       structure: _structure,
       timeSignature: timeSignature.text.trim().isEmpty ? null : timeSignature.text.trim(),

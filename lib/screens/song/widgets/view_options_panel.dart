@@ -191,25 +191,29 @@ class ViewOptionsPanel extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
               child: Column(children: [
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  alignment: WrapAlignment.center,
-                  children: [
-                    for (final t in [0, 1, 2, 3, 4, 5, 6, 7])
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 2),
-                        child: ChoiceChip(
-                          avatar: const Icon(Icons.tune, size: 16),
-                          label: Text(t == 0 ? 'Sin' : t.toString()),
-                          selected: capoActual == t,
-                          selectedColor: AppColors.primary,
-                          showCheckmark: false,
-                          onSelected: (_) => onCapoChanged(t),
-                        ),
+                Row(children: [
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: DropdownButtonFormField<int>(
+                      value: capoActual,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Tras de capo',
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                        isDense: true,
                       ),
-                  ],
-                ),
+                      items: [
+                        for (final t in [0, 1, 2, 3, 4, 5, 6, 7])
+                          DropdownMenuItem<int>(
+                            value: t,
+                            child: Text(t == 0 ? 'Sin capo' : 'Traste $t'),
+                          ),
+                      ],
+                      onChanged: (t) => t != null ? onCapoChanged(t) : null,
+                    ),
+                  ),
+                ]),
                 const SizedBox(height: 8),
                 Align(
                   alignment: Alignment.centerLeft,

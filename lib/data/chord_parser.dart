@@ -31,7 +31,7 @@ String _deaccent(String s) => s
     .replaceAll('ñ', 'n');
 
 final _header = RegExp(
-  r'^\s*[[{(]?\s*(coro|chorus|estribillo|pre-?coro|pre-?chorus|verso|verse|estrofa|puente|bridge|intro|outro|final|tag|interludio|instrumental|transicion|introduccion|presentacion)\s*(\d*)\s*[\]})]?\s*:?\s*$',
+  r'^\s*[[{(]?\s*(coro|chorus|estribillo|refrain|pre[\s-]?coro|pre[\s-]?chorus|verso|verse|estrofa|stanza|puente|bridge|intro|introduction|outro|ending|final|tag|coda|interludio|interlude|instrumental|transicion|transition|introduccion|presentacion)\s*(\d*)\s*[\]})]?\s*:?\s*$',
 );
 
 /// Directiva que abre sección: `{start_of_verse: VERSO 1}`. El texto tras los
@@ -65,10 +65,14 @@ bool isChord(String t) => _chord.hasMatch(t);
 /// Reconoce líneas que actúan como encabezado de sección ("Verso 1", "Coro", etc.)
 /// y también las directivas ChordPro que abren sección (`{start_of_verse: VERSO 1}`).
 bool isSectionHeader(String line) {
-  if (_startOf.hasMatch(line.trim()) || _endOf.hasMatch(line.trim())) return true;
+  final trimmed = line.trim();
+  if (_startOf.hasMatch(trimmed) || _endOf.hasMatch(trimmed)) return true;
+  // Detectar directivas start_of/end_of aunque tengan espacios extra o formato distinto
+  if (RegExp(r'^\{start_of_[a-z_]+:', caseSensitive: false).hasMatch(trimmed) ||
+      RegExp(r'^\{end_of_[a-z_]+\}', caseSensitive: false).hasMatch(trimmed)) return true;
   // Metadatos y comentarios: tampoco se editan como letra.
-  if (RegExp(r'^\\s*\\{\\s*[a-z_]+\\s*[:=]', caseSensitive: false).hasMatch(line)) return true;
-  return _header.hasMatch(_deaccent(line));
+  if (RegExp(r'^\s*\{\s*[a-z_]+\s*[:=]', caseSensitive: false).hasMatch(trimmed)) return true;
+  return _header.hasMatch(_deaccent(trimmed));
 }
 
 /// true si la línea es una directiva ChordPro de apertura de sección.
@@ -85,12 +89,12 @@ bool isChordProDirective(String line) {
 SectionKind _kindFromWord(String w) {
   final k = w.toLowerCase().replaceAll('-', '').replaceAll('_', '').replaceAll(' ', '');
   if (k.startsWith('prechorus')) return SectionKind.prechorus;
-  if (k.contains('chorus') || k.contains('estribillo')) return SectionKind.chorus;
-  if (k.contains('verse') || k.contains('estrofa')) return SectionKind.verse;
+  if (k.contains('chorus') || k.contains('estribillo') || k.contains('refrain')) return SectionKind.chorus;
+  if (k.contains('verse') || k.contains('estrofa') || k.contains('stanza')) return SectionKind.verse;
   if (k.contains('bridge') || k.contains('puente')) return SectionKind.bridge;
-  if (k.contains('intro') || k.contains('presentacion')) return SectionKind.intro;
+  if (k.contains('intro') || k.contains('presentacion') || k.contains('introduction')) return SectionKind.intro;
   if (k.contains('outro')) return SectionKind.outro;
-  if (k.contains('final') || k.contains('ending') || k.contains('tag')) return SectionKind.ending;
+  if (k.contains('final') || k.contains('ending') || k.contains('tag') || k.contains('coda')) return SectionKind.ending;
   return SectionKind.other;
 }
 

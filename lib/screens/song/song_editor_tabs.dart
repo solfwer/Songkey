@@ -102,7 +102,7 @@ class _ContentTabState extends State<ContentTab> {
                 songKey: widget.songKey.text,
                 onChanged: widget.onVisualChanged,
               )
-            : ChordProEditor(controller: widget.body, wide: wide),
+            : ChordProEditor(controller: widget.body, wide: wide, songKey: widget.songKey.text),
       ),
       // El botn de guardar est en la barra inferior del editor, fuera de
       // aqu, para que se vea en todas las pestaas.
@@ -120,7 +120,11 @@ class ChordProEditor extends StatefulWidget {
   /// Numeros de linea (1-based) que se resaltan con fondo naranja para que
   /// el usuario vea de un vistazo lo que tiene que revisar.
   final Set<int> warningLines;
-  const ChordProEditor({super.key, required this.controller, required this.wide, this.warningLines = const {}});
+
+  /// Tonalidad de la canción (para mostrar la barra de acordes rápidos).
+  /// Si es null no se muestra la barra.
+  final String? songKey;
+  const ChordProEditor({super.key, required this.controller, required this.wide, this.warningLines = const {}, this.songKey});
 
   @override
   State<ChordProEditor> createState() => _ChordProEditorState();
@@ -135,6 +139,38 @@ class _ChordProEditorState extends State<ChordProEditor> {
     _local = ChordSyntaxController(text: widget.controller.text)..warningLines = widget.warningLines;
     _local.addListener(_push);
     widget.controller.addListener(_pull);
+  }
+
+  /// Inserta [acorde] entre corchetes en la posición del cursor del editor.
+  void _insertarAcorde(String acorde) {
+    final sel = _local.selection;
+    final inicio = sel.start.clamp(0, _local.text.length);
+    _local.value = TextEditingValue(
+      text: _local.text.replaceRange(inicio, inicio, '[$acorde]'),
+      selection: TextSelection.collapsed(offset: inicio + acorde.length + 2),
+    );
+  }
+
+  /// Fila de chips de acordes de la tonalidad para insertar tocando.
+  Widget _buildAcordeBar(String songKey) {
+    final grupos = quickBarChords(songKey);
+    return SizedBox(
+      height: 44,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        children: [
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 6),
+            child: Text('Acorde:', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ),
+          for (final acorde in grupos.scale) ...[
+            const SizedBox(width: 4),
+            _ChipAcordeSimple(acorde: acorde, onTap: () => _insertarAcorde(acorde)),
+          ],
+        ],
+      ),
+    );
   }
 
   @override
@@ -192,13 +228,26 @@ class _ChordProEditorState extends State<ChordProEditor> {
       ),
     );
 
+    Widget editorConBarra = editor;
+    if (widget.songKey != null && widget.songKey!.isNotEmpty) {
+      editorConBarra = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildAcordeBar(widget.songKey!),
+          const SizedBox(height: 4),
+          Expanded(child: editor),
+        ],
+      );
+    }
+
+    final fondo = Theme.of(context).colorScheme.surfaceContainerLowest;
     if (!widget.wide) {
-      return Container(color: Colors.black12, child: editor);
+      return Container(color: fondo, child: editorConBarra);
     }
 
     // Pantalla ancha: editor a la izquierda, vista previa en vivo a la derecha.
     return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Expanded(flex: 5, child: Container(color: Colors.black12, child: editor)),
+      Expanded(flex: 5, child: Container(color: fondo, child: editorConBarra)),
       const VerticalDivider(width: 1),
       Expanded(
         flex: 4,
@@ -271,6 +320,31 @@ TextSpan _spanTexto(String t, Color? fondo) {
   }
   return TextSpan(text: t, style: TextStyle(backgroundColor: fondo));
 }
+class _ChipAcordeSimple extends StatelessWidget {
+  final String acorde;
+  final VoidCallback onTap;
+  const _ChipAcordeSimple({required this.acorde, required this.onTap});
+  @override
+  Widget build(BuildContext context) => InkWell(
+    borderRadius: BorderRadius.circular(8),
+    onTap: onTap,
+    child: Container(
+      constraints: const BoxConstraints(minWidth: 42),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLowest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
+      child: Text(
+        acorde,
+        style: TextStyle(fontFamily: 'monospace', fontSize: 13, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface),
+      ),
+    ),
+  );
+}
+
 /// Vista previa en vivo de la pestaa "Contenido" (pantalla ancha).
 class _LivePreview extends StatelessWidget {
   final String text;

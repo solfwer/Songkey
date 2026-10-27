@@ -13,6 +13,9 @@ class PdfWord {
   final double bottom;
   final double fontSize;
 
+  /// Página del documento a la que pertenece la palabra.
+  final int page;
+
   /// Posición X de cada carácter de [text] (si el extractor la pudo dar). Si
   /// viene vacía, se calcula a partes iguales entre [left] y [right].
   final List<double> glyphLefts;
@@ -25,6 +28,7 @@ class PdfWord {
     required this.bottom,
     this.fontSize = 12,
     this.glyphLefts = const [],
+    this.page = 0,
   });
 
   double get width => right - left;
@@ -36,7 +40,11 @@ class PdfLine {
   final List<PdfWord> words;
   final int page;
 
-  const PdfLine({required this.words, this.page = 0});
+  /// false = línea reconstruida desde el texto en modo layout: el texto y el
+  /// orden son fiables, las coordenadas no (van a cero).
+  final bool positioned;
+
+  const PdfLine({required this.words, this.page = 0, this.positioned = true});
 
   double get top => words.isEmpty ? 0 : words.map((w) => w.top).reduce((a, b) => a < b ? a : b);
   double get bottom => words.isEmpty ? 0 : words.map((w) => w.bottom).reduce((a, b) => a > b ? a : b);
@@ -99,9 +107,19 @@ class HeaderMatch {
   final String directive;
   final String label;
 
-  /// Texto que venía después del encabezado (suele ser una progresión).
+  /// Texto que venía después del encabezado (progresión o primera línea de
+  /// letra, según el PDF).
   final String rest;
-  const HeaderMatch({required this.directive, required this.label, this.rest = ''});
+
+  /// Cuántas palabras de la línea ocupa el encabezado (etiqueta, número, xN).
+  final int wordCount;
+
+  const HeaderMatch({
+    required this.directive,
+    required this.label,
+    this.rest = '',
+    this.wordCount = 0,
+  });
 }
 
 /// Una línea ya clasificada.

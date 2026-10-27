@@ -15,9 +15,9 @@ class PdfImportButton extends StatelessWidget {
   const PdfImportButton({super.key, required this.store, this.initialGroupId});
 
   Future<void> _import(BuildContext context) async {
-    final res = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf'], withData: true);
-    final file = res?.files.firstOrNull;
-    final bytes = file?.bytes;
+    final res = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
+    final file = res.firstOrNull;
+    final bytes = await file?.readAsBytes();
     if (file == null || bytes == null) return;
     if (!context.mounted) return;
 
@@ -30,7 +30,8 @@ class PdfImportButton extends StatelessWidget {
 
     PdfConversion conversion;
     try {
-      conversion = const PdfToChordProService().convert(bytes, fallbackTitle: file.name.replaceAll(RegExp(r'\.pdf$', caseSensitive: false), ''));
+      // Se ejecuta en un isolate aparte: la UI no se bloquea aunque el PDF sea grande.
+      conversion = await const PdfToChordProService().convertAsync(bytes, fallbackTitle: file.name.replaceAll(RegExp(r'\.pdf$', caseSensitive: false), ''));
     } catch (_) {
       if (context.mounted) Navigator.of(context).pop();
       if (context.mounted) {

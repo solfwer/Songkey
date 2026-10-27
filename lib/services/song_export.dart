@@ -140,10 +140,12 @@ Uint8List buildSongPdf(Song song, {int semitones = 0, bool lyricsOnly = false}) 
 Future<void> shareSongText(BuildContext context, Song song, {int semitones = 0, bool lyricsOnly = false}) async {
   final origin = shareOrigin(context);
   try {
-    await Share.share(
-      songToPlainText(song, semitones: semitones, lyricsOnly: lyricsOnly),
-      subject: song.title,
-      sharePositionOrigin: origin,
+    await SharePlus.instance.share(
+      ShareParams(
+        text: songToPlainText(song, semitones: semitones, lyricsOnly: lyricsOnly),
+        subject: song.title,
+        sharePositionOrigin: origin,
+      ),
     );
   } catch (e) {
     if (context.mounted) {
@@ -177,10 +179,12 @@ Future<void> shareSongPdf(BuildContext context, Song song, {int semitones = 0, b
     // Compartir por el panel del sistema
     final origin = shareOrigin(context);
     final file = await tempPdfFile('${song.title}_tono_${transposeChord(song.key, semitones)}', bytes);
-    await Share.shareXFiles(
-      [XFile(file.path, mimeType: 'application/pdf')],
-      text: '${song.title} - Tono ${transposeChord(song.key, semitones)}',
-      sharePositionOrigin: origin,
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(file.path, mimeType: 'application/pdf')],
+        text: '${song.title} - Tono ${transposeChord(song.key, semitones)}',
+        sharePositionOrigin: origin,
+      ),
     );
   } catch (e) {
     if (context.mounted) {

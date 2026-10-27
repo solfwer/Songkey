@@ -39,7 +39,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    final t = tamanoDe(tester, 'linea del verso');
+    final t = tamanoDe(tester, 'linea');
     expect(t, isNotNull);
     expect(t!, lessThanOrEqualTo(14));
     // Las secciones siguen saliendo una sola vez, con su etiqueta.
@@ -62,7 +62,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(tamanoDe(tester, 'linea del verso'), 20);
+    expect(tamanoDe(tester, 'linea'), 20);
     expect(tamanoDe(tester, 'Aleluya'), 20);
   });
 
@@ -82,7 +82,7 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
-    final pequeno = tamanoDe(tester, 'linea del verso');
+    final pequeno = tamanoDe(tester, 'linea');
 
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
@@ -92,7 +92,7 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
-    final grande = tamanoDe(tester, 'linea del verso');
+    final grande = tamanoDe(tester, 'linea');
 
     expect(pequeno, 12);
     expect(grande, 26);
