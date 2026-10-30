@@ -7,15 +7,13 @@
 import 'package:flutter/material.dart';
 
 import '../../data/chordpro.dart';
+import '../../data/chord_parser.dart';
+import '../../services/metronome.dart';
 import '../../data/store.dart';
 import '../../models/app_state.dart';
 import '../../models/setlist.dart';
 import '../../models/song.dart';
-import '../../models/song_metadata_suggestion.dart';
 import '../../services/metadata/chord_key_detector.dart';
-import '../../services/metadata/getsongbpm_client.dart';
-import '../../services/metadata/musicbrainz_client.dart';
-import '../../services/metadata/song_metadata_service.dart';
 import 'widgets/pdf_import_button.dart';
 import 'song_editor_tabs.dart';
 import 'structure_tab.dart';
@@ -24,19 +22,28 @@ class SongEditorPage extends StatefulWidget {
   final Store store;
   final Song? song;
   final String? initialGroupId;
-  final String? setlistId; // Si no es null, guarda como override en este setlist
+  final String?
+      setlistId; // Si no es null, guarda como override en este setlist
 
   /// Borrador inicial (sin canción guardada todavía) para importaciones de PDF
   /// o documentos ChordPro. Solo se usa si [song] es null.
   final String? initialTitle;
   final String? initialBody;
-  const SongEditorPage({super.key, required this.store, this.song, this.initialGroupId, this.initialTitle, this.initialBody, this.setlistId});
+  const SongEditorPage(
+      {super.key,
+      required this.store,
+      this.song,
+      this.initialGroupId,
+      this.initialTitle,
+      this.initialBody,
+      this.setlistId});
 
   @override
   State<SongEditorPage> createState() => _SongEditorPageState();
 }
 
-class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProviderStateMixin {
+class _SongEditorPageState extends State<SongEditorPage>
+    with SingleTickerProviderStateMixin {
   late final TextEditingController title;
   late final TextEditingController key;
   late final TextEditingController bpm;
@@ -47,11 +54,8 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
   List<String>? _structure;
   late TabController _tabCtrl;
 
-  /// Servicio de metadatos (detección offline + APIs online).
-  late final SongMetadataService _metaService;
-
-  /// Estado de carga para el autocompletar.
-  bool _metaLoading = false;
+  /// Detector de tonalidad a partir de los acordes (offline).
+  final ChordKeyDetector _keyDetector = ChordKeyDetector();
 
   /// true mientras el cambio de texto viene del editor visual: as no se
   /// reconstruye el editor con su propio resultado.
@@ -78,96 +82,37 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
     fill(timeSignature, meta.time);
   }
 
-  /// Autocompleta metadatos (tono, BPM, autor, compás) desde acordes y APIs online.
-  /// Nunca sobrescribe campos que el usuario ya haya llenado.
-  Future<void> _autoCompletar() async {
-    final t = title.text.trim();
-    if (t.isEmpty) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Escribe un título primero')));
-      return;
+  /// Detecta la tonalidad a partir de los acordes del texto (offline, sin
+  /// internet) y la pone en el campo "Tono". Lo dispara el usuario con el botón.
+  void _detectarTono() {
+    final texto = body.text;
+    final det = texto.trim().isEmpty ? null : _keyDetector.detect(texto);
+    final detectado = (det != null && det.key != null && det.confidence >= 0.3)
+        ? det.key!
+        : null;
+    if (detectado != null) {
+      setState(() => key.text = detectado);
     }
-    setState(() => _metaLoading = true);
-    try {
-      final existente = {
-        'key': key.text.trim().isEmpty ? null : key.text.trim(),
-        'author': author.text.trim().isEmpty ? null : author.text.trim(),
-        'bpm': bpm.text.trim().isEmpty ? null : bpm.text.trim(),
-        'timeSignature': timeSignature.text.trim().isEmpty ? null : timeSignature.text.trim(),
-      };
-      final sugerencia = await _metaService.sugerir(
-        titulo: t,
-        chordProText: body.text.isNotEmpty ? body.text : null,
-        existing: existente,
-        consultarOnline: true,
-      );
-
-      // Aplicar solo campos vacíos (nunca sobrescribir).
-      setState(() {
-        if (sugerencia.key != null && key.text.trim().isEmpty) {
-          key.text = sugerencia.key!.value;
-        }
-        if (sugerencia.bpm != null && bpm.text.trim().isEmpty) {
-          bpm.text = sugerencia.bpm!.value.toString();
-        }
-        if (sugerencia.timeSignature != null && timeSignature.text.trim().isEmpty) {
-          timeSignature.text = sugerencia.timeSignature!.value;
-        }
-      });
-
-      // Artista: si hay varios candidatos con artistas distintos, deja que el
-      // usuario elija en vez de auto-completar con uno posiblemente erróneo.
-      if (author.text.trim().isEmpty && sugerencia.candidates.isNotEmpty) {
-        final artistasDistintos = sugerencia.candidates
-            .where((c) => c.artist != null && c.artist!.trim().isNotEmpty)
-            .map((c) => c.artist!.trim())
-            .toSet();
-        if (artistasDistintos.length > 1) {
-          if (mounted) {
-            final elegido = await _seleccionarArtista(sugerencia.candidates);
-            if (elegido != null && elegido.trim().isNotEmpty) {
-              author.text = elegido;
-            }
-          }
-        } else if (sugerencia.artist != null) {
-          author.text = sugerencia.artist!.value;
-        }
-      }
-
-      if (mounted) {
-        final partes = <String>[];
-        if (sugerencia.key != null) partes.add('tono: ${sugerencia.key!.value}');
-        if (sugerencia.bpm != null) partes.add('BPM: ${sugerencia.bpm!.value}');
-        if (sugerencia.artist != null) partes.add('autor: ${sugerencia.artist!.value}');
-        if (sugerencia.timeSignature != null) partes.add('compás: ${sugerencia.timeSignature!.value}');
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(partes.isEmpty ? 'No se encontraron metadatos' : 'Sugerido: ${partes.join(', ')}'),
-          duration: const Duration(seconds: 4),
-        ));
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se pudo autocompletar')));
-      }
-    } finally {
-      if (mounted) setState(() => _metaLoading = false);
-    }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(detectado != null
+          ? 'Tono detectado por los acordes: $detectado'
+          : 'No hay acordes suficientes para detectar el tono'),
+      duration: const Duration(seconds: 3),
+    ));
   }
 
   @override
   void initState() {
     super.initState();
-    title = TextEditingController(text: widget.song?.title ?? widget.initialTitle ?? '');
+    title = TextEditingController(
+        text: widget.song?.title ?? widget.initialTitle ?? '');
     key = TextEditingController(text: widget.song?.key ?? 'C');
     bpm = TextEditingController(text: widget.song?.bpm?.toString() ?? '');
     author = TextEditingController(text: widget.song?.author ?? '');
-    body = TextEditingController(text: widget.song?.body ?? widget.initialBody ?? '');
-    timeSignature = TextEditingController(text: widget.song?.timeSignature ?? '');
-    // Servicio de metadatos: GetSongBPM key via --dart-define (vacío = sin API online).
-    final gsbKey = String.fromEnvironment('GETSONGBPM_KEY');
-    _metaService = SongMetadataService(
-      getsongbpm: GetSongBpmClient(apiKey: gsbKey),
-      musicbrainz: MusicBrainzClient(),
-    );
+    body = TextEditingController(
+        text: widget.song?.body ?? widget.initialBody ?? '');
+    timeSignature =
+        TextEditingController(text: widget.song?.timeSignature ?? '');
     // Canciones antiguas sin author/bpm guardados: se sacan de las directivas.
     if (widget.song != null) _syncMetaFromBody();
     _bodyInicial = body.text;
@@ -214,93 +159,139 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
         if (!didPop) _confirmarSalida();
       },
       child: Scaffold(
-      // El botn de guardar vive aqu, fuera de las pestaas: as se ve siempre
-      // (tambin en ChordPro y en el editor visual) y no estorba al escribir.
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
-          child: FilledButton.icon(
-            onPressed: save,
-            icon: Icon(_guardado ? Icons.check : Icons.save, size: 18),
-            label: Text(_guardado ? 'Guardado' : 'Guardar'),
-            style: _guardado ? FilledButton.styleFrom(backgroundColor: Colors.green) : null,
+        // El botn de guardar vive aqu, fuera de las pestaas: as se ve siempre
+        // (tambin en ChordPro y en el editor visual) y no estorba al escribir.
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+            child: FilledButton.icon(
+              onPressed: save,
+              icon: Icon(_guardado ? Icons.check : Icons.save, size: 18),
+              label: Text(_guardado ? 'Guardado' : 'Guardar'),
+              style: _guardado
+                  ? FilledButton.styleFrom(backgroundColor: Colors.green)
+                  : null,
+            ),
           ),
         ),
-      ),
-      appBar: AppBar(
-        title: Text(widget.song == null ? 'Nueva canción' : 'Editar canción'),
-        bottom: TabBar(
+        appBar: AppBar(
+          title: Text(widget.song == null ? 'Nueva canción' : 'Editar canción'),
+          bottom: TabBar(
+            controller: _tabCtrl,
+            isScrollable: false,
+            tabs: const [
+              Tab(text: 'Datos'),
+              Tab(text: 'Contenido'),
+              Tab(text: 'Estructura'),
+              Tab(text: 'Vista'),
+            ],
+          ),
+        ),
+        body: TabBarView(
           controller: _tabCtrl,
-          isScrollable: false,
-          tabs: const [
-            Tab(text: 'Datos'),
-            Tab(text: 'Contenido'),
-            Tab(text: 'Estructura'),
-            Tab(text: 'Vista'),
+          children: [
+            // Pestaña 1: Datos de la canción
+          SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(children: [
+                      Expanded(
+                        child: TextField(
+                            controller: title,
+                            decoration:
+                                const InputDecoration(labelText: 'Título')),
+                      ),
+                      const SizedBox(width: 6),
+                      OutlinedButton(
+                        onPressed: _detectarTono,
+                        style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8)),
+                        child:
+                            const Text('Tono', style: TextStyle(fontSize: 12)),
+                      ),
+                    ]),
+                    const SizedBox(height: 12),
+                    TextField(
+                        controller: author,
+                        decoration: const InputDecoration(
+                            labelText: 'Autor (opcional)')),
+                    const SizedBox(height: 12),
+                    Row(children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          initialValue: key.text.isEmpty ? 'C' : key.text,
+                          isExpanded: true,
+                          decoration: const InputDecoration(labelText: 'Tono'),
+                          items: List<DropdownMenuItem<String>>.from(
+                            twelveKeys.map((t) => DropdownMenuItem(
+                              value: t,
+                              child: Text(notateChord(t, american: true)),
+                            )),
+                          ),
+                          onChanged: (v) {
+                            if (v != null) setState(() => key.text = v);
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: bpm,
+                          decoration: InputDecoration(
+                              labelText: 'BPM',
+                              suffixIcon: _TapTempoIcon(controller: bpm)),
+                          keyboardType: TextInputType.number),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          initialValue: timeSignature.text.isEmpty ? '4/4' : timeSignature.text,
+                          isExpanded: true,
+                          decoration: const InputDecoration(labelText: 'Compás'),
+                          items: List<DropdownMenuItem<String>>.from(
+                            timeSignatures.map((t) => DropdownMenuItem(
+                              value: t.label,
+                              child: Text(t.label),
+                            )),
+                          ),
+                          onChanged: (v) {
+                            if (v != null) setState(() => timeSignature.text = v);
+                          },
+                        ),
+                      ),
+                    ]),
+                    const SizedBox(height: 24),
+                    PdfImportButton(
+                        store: widget.store, initialGroupId: groupId),
+                    const SizedBox(height: 12),
+                    FilledButton(onPressed: save, child: const Text('Guardar')),
+                  ]),
+            ),
+            // Pestaña 2: Contenido (un solo sitio para la letra y los acordes,
+            // con dos formas de editar: visual o ChordPro).
+            ContentTab(
+              body: body,
+              songKey: key,
+              visualRevision: _visualRev,
+              onVisualChanged: _onVisualChanged,
+              store: widget.store,
+            ),
+            // Pestaña 3: secciones y orden de toque
+            StructureTab(
+                controller: body,
+                initialStructure: _structure,
+                onStructureChanged: (v) => _structure = v),
+            // Pestaña 4: vista previa de cmo queda la cancin
+            PreviewTab(
+              body: body,
+              structure: _structure,
+              songKey: key,
+              title: title,
+            ),
           ],
         ),
-      ),
-      body: TabBarView(
-        controller: _tabCtrl,
-        children: [
-          // Pestaña 1: Datos de la canción
-          SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Row(children: [
-                Expanded(
-                  child: TextField(controller: title, decoration: const InputDecoration(labelText: 'Título')),
-                ),
-                const SizedBox(width: 6),
-                if (!_metaLoading)
-                  OutlinedButton(
-                    onPressed: _autoCompletar,
-                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
-                    child: const Text('Auto', style: TextStyle(fontSize: 12)),
-                  )
-                else
-                  const SizedBox(
-                    width: 28,
-                    height: 28,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-              ]),
-              const SizedBox(height: 12),
-              TextField(controller: author, decoration: const InputDecoration(labelText: 'Autor (opcional)')),
-              const SizedBox(height: 12),
-              Row(children: [
-                Expanded(child: TextField(controller: key, decoration: const InputDecoration(labelText: 'Tono'))),
-                const SizedBox(width: 12),
-                Expanded(child: TextField(controller: bpm, decoration: InputDecoration(labelText: 'BPM', suffixIcon: _TapTempoIcon(controller: bpm)), keyboardType: TextInputType.number)),
-                const SizedBox(width: 12),
-                Expanded(child: TextField(controller: timeSignature, decoration: const InputDecoration(labelText: 'Compás (ej. 4/4)'))),
-              ]),
-              const SizedBox(height: 24),
-              PdfImportButton(store: widget.store, initialGroupId: groupId),
-              const SizedBox(height: 12),
-              FilledButton(onPressed: save, child: const Text('Guardar')),
-            ]),
-          ),
-          // Pestaña 2: Contenido (un solo sitio para la letra y los acordes,
-          // con dos formas de editar: visual o ChordPro).
-          ContentTab(
-            body: body,
-            songKey: key,
-            visualRevision: _visualRev,
-            onVisualChanged: _onVisualChanged,
-            store: widget.store,
-          ),
-          // Pestaña 3: secciones y orden de toque
-          StructureTab(controller: body, initialStructure: _structure, onStructureChanged: (v) => _structure = v),
-          // Pestaña 4: vista previa de cmo queda la cancin
-          PreviewTab(
-            body: body,
-            structure: _structure,
-            songKey: key,
-            title: title,
-          ),
-        ],
-      ),
       ),
     );
   }
@@ -322,11 +313,18 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Tienes cambios sin guardar'),
-        content: const Text('Si sales ahora se perdern los ltimos cambios en la letra y los acordes.'),
+        content: const Text(
+            'Si sales ahora se perdern los ltimos cambios en la letra y los acordes.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Seguir editando')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Salir sin guardar')),
-          FilledButton(onPressed: () => Navigator.pop(context, null), child: const Text('Guardar')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Seguir editando')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Salir sin guardar')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, null),
+              child: const Text('Guardar')),
         ],
       ),
     );
@@ -335,55 +333,6 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
     } else if (salir == null) {
       save();
     }
-  }
-
-  /// Muestra un diálogo para que el usuario elija el artista correcto entre
-  /// los candidatos devueltos por las APIs. Devuelve el artista elegido o null
-  /// si canceló.
-  Future<String?> _seleccionarArtista(List<SongCandidate> candidates) async {
-    final conArtista = candidates
-        .where((c) => c.artist != null && c.artist!.trim().isNotEmpty)
-        .toList();
-    if (conArtista.isEmpty) return null;
-
-    // Elimina duplicados manteniendo el orden.
-    final vistos = <String>{};
-    final unicos = <SongCandidate>[];
-    for (final c in conArtista) {
-      final a = c.artist!.trim();
-      if (vistos.add(a)) unicos.add(c);
-    }
-
-    return showDialog<String>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Elige el artista'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: unicos.length,
-            itemBuilder: (_, i) {
-              final c = unicos[i];
-              final subtitle = c.source == 'getsongbpm' ? 'GetSongBPM' : 'MusicBrainz';
-              return ListTile(
-                title: Text(c.artist!),
-                subtitle: Text('${c.title} (${subtitle})', style: const TextStyle(fontSize: 11)),
-                onTap: () => Navigator.pop(_, c.artist),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(_), child: const Text('Cancelar')),
-          if (unicos.length == 1)
-            FilledButton(
-              onPressed: () => Navigator.pop(_, unicos.first.artist),
-              child: const Text('Usar'),
-            ),
-        ],
-      ),
-    );
   }
 
   /// Deja el cuerpo como lo escribi el usuario y solo pone al principio las
@@ -396,7 +345,9 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
     required String tempo,
     String? timeSignature,
   }) {
-    final meta = RegExp(r'^\s*\{\s*(title|t|subtitle|st|artist|author|composer|key|k|tempo|bpm|time|capo)\s*[:=].*\}\s*$', caseSensitive: false);
+    final meta = RegExp(
+        r'^\s*\{\s*(title|t|subtitle|st|artist|author|composer|key|k|tempo|bpm|time|capo)\s*[:=].*\}\s*$',
+        caseSensitive: false);
     final lineas = cuerpo.replaceAll('\r', '').split('\n');
     final resto = <String>[];
     for (final l in lineas) {
@@ -411,11 +362,13 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
       if (autor.isNotEmpty) '{artist: $autor}',
       if (tono.isNotEmpty) '{key: $tono}',
       if (tempo.isNotEmpty) '{tempo: $tempo}',
-      if (timeSignature != null && timeSignature.isNotEmpty) '{time: $timeSignature}',
+      if (timeSignature != null && timeSignature.isNotEmpty)
+        '{time: $timeSignature}',
     ];
     if (cabecera.isEmpty) return resto.join('\n');
     return [...cabecera, '', ...resto].join('\n');
   }
+
   void save() {
     if (title.text.trim().isEmpty) return;
     final id = widget.song?.id ?? uid();
@@ -453,7 +406,8 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
       durationSec: widget.song?.durationSec,
       lastOpenedAt: widget.song?.lastOpenedAt,
       structure: _structure,
-      timeSignature: timeSignature.text.trim().isEmpty ? null : timeSignature.text.trim(),
+      timeSignature:
+          timeSignature.text.trim().isEmpty ? null : timeSignature.text.trim(),
     );
 
     if (widget.setlistId != null) {
@@ -479,7 +433,9 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
     } else {
       // Guardar en la biblioteca (comportamiento original)
       widget.store.update((s) {
-        final songs = s.songs.any((x) => x.id == id) ? s.songs.map((x) => x.id == id ? song : x).toList() : [song, ...s.songs];
+        final songs = s.songs.any((x) => x.id == id)
+            ? s.songs.map((x) => x.id == id ? song : x).toList()
+            : [song, ...s.songs];
         return AppState(groups: s.groups, songs: songs, setlists: s.setlists);
       });
     }
@@ -503,7 +459,8 @@ class _TapTempoIconState extends State<_TapTempoIcon> {
 
   void _tap() {
     final now = DateTime.now();
-    if (_taps.isNotEmpty && now.difference(_taps.last).inMilliseconds > 3000) _taps.clear();
+    if (_taps.isNotEmpty && now.difference(_taps.last).inMilliseconds > 3000)
+      _taps.clear();
     _taps.add(now);
     if (_taps.length > 8) _taps.removeAt(0);
     if (_taps.length >= 2) {

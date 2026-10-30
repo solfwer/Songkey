@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../../data/store.dart';
+import '../../../services/pdf_chordpro/pdf_import.dart';
 import '../../../services/pdf_chordpro/pdf_to_chordpro_service.dart';
 import '../pdf_review_page.dart';
 import '../pdf_format_help_page.dart';
@@ -31,7 +32,7 @@ class PdfImportButton extends StatelessWidget {
     PdfConversion conversion;
     try {
       // Se ejecuta en un isolate aparte: la UI no se bloquea aunque el PDF sea grande.
-      conversion = await const PdfToChordProService().convertAsync(bytes, fallbackTitle: file.name.replaceAll(RegExp(r'\.pdf$', caseSensitive: false), ''));
+      conversion = await importPdf(bytes, fallbackTitle: file.name.replaceAll(RegExp(r'\.pdf$', caseSensitive: false), ''));
     } catch (_) {
       if (context.mounted) Navigator.of(context).pop();
       if (context.mounted) {

@@ -1,5 +1,6 @@
 // Biblioteca de canciones: buscador + botón "+" para añadir canciones
-// (manualmente con ChordPro, desde un PDF o desde un documento ChordPro).
+// (manualmente con ChordPro, desde un PDF o documento ChordPro).
+// Archivos de exportación: .sk (canción o biblioteca completa).
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -12,6 +13,7 @@ import '../../data/format.dart';
 import '../../data/store.dart';
 import '../../models/app_state.dart';
 import '../../models/song.dart';
+import '../../services/pdf_chordpro/pdf_import.dart';
 import '../../services/pdf_chordpro/pdf_to_chordpro_service.dart';
 import '../song/pdf_review_page.dart';
 import '../../theme.dart';
@@ -98,7 +100,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     List<PdfConversion> conversions;
     try {
       // Se ejecuta en un isolate aparte: la UI no se bloquea aunque el PDF sea grande.
-      conversions = await const PdfToChordProService().convertAllAsync(bytes, fallbackTitle: base);
+      conversions = await importPdfAll(bytes, fallbackTitle: base);
     } catch (_) {
       conversions = const [];
     }
@@ -469,7 +471,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         final secs = parseSong(song.body).where((x) => x.kind != SectionKind.other).toList();
                         // Vista compacta: solo secciones únicas (sin repeticiones).
                         final uniqueAbbrs = secs.map((x) => x.abbr).toSet().toList();
-                        final group = s.groups.where((g) => g.id == song.groupId).map((g) => g.name).cast<String?>().firstWhere((_) => true, orElse: () => null);
                         final duration = formatDuration(song.durationSec);
                         // ¿Dónde coincide la búsqueda?
                         final f = q.trim().toLowerCase();
@@ -503,7 +504,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           isThreeLine: song.style != null || duration.isNotEmpty,
                           subtitle: Text(
                             [
-                              group ?? 'Sin grupo',
                               if (song.style != null && song.style!.isNotEmpty) song.style!,
                               if (song.bpm != null) '${song.bpm} BPM',
                               if (duration.isNotEmpty) duration,

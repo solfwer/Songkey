@@ -14,6 +14,14 @@ const double columnGapThresholdPt = 12;
 /// altura mediana de las palabras de la columna.
 const double lineGroupTolerance = 0.5;
 
+/// Fracción mínima del texto (en caracteres) que debe tener CADA lado para que
+/// el hueco cuente como separación de columnas. Evita tomar por columna unos
+/// pocos acordes pegados al borde derecho de una canción de una sola columna.
+const double columnMinTextShare = 0.2;
+
+/// Filas distintas mínimas en cada lado para aceptar dos columnas.
+const int columnMinRows = 3;
+
 /// Banda de la página donde se busca el hueco entre columnas (25%..75%).
 const double columnSearchStart = 0.25;
 const double columnSearchEnd = 0.75;
@@ -58,6 +66,22 @@ double? detectColumnSplit(List<PdfWord> words, double pageWidth) {
   final right = words.where((w) => w.left >= split).toList();
   if (left.length < 3 || right.length < 3) return null;
 
+  // Una columna real tiene una cantidad de texto comparable a la otra y varias
+  // filas. Unos pocos acordes al borde derecho de una canción de UNA columna
+  // (el hueco existe, pero casi no hay texto) no son una columna: partirlos
+  // separa el acorde de su línea y lo deja huérfano.
+  int chars(List<PdfWord> ws) =>
+      ws.fold(0, (sum, w) => sum + w.text.trim().length);
+  final total = chars(words);
+  if (total == 0) return null;
+  if (chars(left) < total * columnMinTextShare ||
+      chars(right) < total * columnMinTextShare) {
+    return null;
+  }
+  if (_rowCount(left) < columnMinRows || _rowCount(right) < columnMinRows) {
+    return null;
+  }
+
   final leftTop = left.map((w) => w.top).reduce(math.min);
   final leftBottom = left.map((w) => w.bottom).reduce(math.max);
   final rightTop = right.map((w) => w.top).reduce(math.min);
@@ -68,37 +92,36 @@ double? detectColumnSplit(List<PdfWord> words, double pageWidth) {
 
 /// Agrupa las palabras en líneas: página -> columna (la izquierda entera y
 /// luego la derecha) -> fila. Dentro de cada línea, de izquierda a derecha.
-List<PdfLine> groupLines(List<PdfWord> words, double splitX) {
+///
+/// [tolerance] es la fracción de la altura mediana de las palabras que puede
+/// separar dos palabras de la misma fila. Si el PDF da alturas infladas, con la
+/// tolerancia por defecto la fila de acordes y la de letra se funden: bajarla
+/// las separa.
+List<PdfLine> groupLines(
+  List<PdfWord> words,
+  double splitX, {
+  double tolerance = lineGroupTolerance,
+}) {
   final lines = <PdfLine>[];
   final pages = words.map((w) => w.page).toSet().toList()..sort();
   for (final page in pages) {
     final pageWords = words.where((w) => w.page == page);
     for (final leftColumn in const [true, false]) {
       final column = pageWords.where((w) => (w.left < splitX) == leftColumn);
-      lines.addAll(_groupColumn(column, page));
+      lines.addAll(_groupColumn(column, page, tolerance));
     }
   }
-  // FIX: evitar que todos los acordes/letras de la izquierda se junten
-  // antes que los de la derecha en canciones de 2 columnas.
-  lines.sort((a, b) {
-    final pageCmp = a.page.compareTo(b.page);
-    if (pageCmp != 0) return pageCmp;
-    // Ordenar por centro Y (fila) primero, luego por X (columna/izq)
-    final yA = a.words.isNotEmpty ? (a.words.first.top + a.words.first.bottom) / 2 : 0;
-    final yB = b.words.isNotEmpty ? (b.words.first.top + b.words.first.bottom) / 2 : 0;
-    final yCmp = yA.compareTo(yB);
-    if (yCmp != 0) return yCmp;
-    final xA = a.words.isNotEmpty ? a.words.first.left : 0;
-    final xB = b.words.isNotEmpty ? b.words.first.left : 0;
-    return xA.compareTo(xB);
-  });
+  // IMPORTANTE: NO reordenar `lines` por Y aquí. El orden es página -> columna
+  // (izquierda entera, luego derecha) -> fila. Mezclar las columnas por Y
+  // intercala "acordes izq, acordes der, letra izq, letra der" y rompe la
+  // pareja acorde/letra que busca el servicio (la línea siguiente).
   return lines;
 }
 
-List<PdfLine> _groupColumn(Iterable<PdfWord> words, int page) {
+List<PdfLine> _groupColumn(Iterable<PdfWord> words, int page, double factor) {
   final column = words.toList();
   if (column.isEmpty) return const [];
-  final tolerance = _medianHeight(column) * lineGroupTolerance;
+  final tolerance = _medianHeight(column) * factor;
   final sorted = [...column]..sort((a, b) {
       final t = _centerY(a).compareTo(_centerY(b));
       return t != 0 ? t : a.left.compareTo(b.left);
@@ -120,6 +143,22 @@ List<PdfLine> _groupColumn(Iterable<PdfWord> words, int page) {
   }
   if (row.isNotEmpty) lines.add(PdfLine(words: _sortedByX(row), page: page));
   return lines;
+}
+
+/// Número de filas distintas (por centro Y) de un grupo de palabras.
+int _rowCount(List<PdfWord> words) {
+  if (words.isEmpty) return 0;
+  final tol = _medianHeight(words) * lineGroupTolerance;
+  final ys = words.map(_centerY).toList()..sort();
+  var rows = 1;
+  var rowY = ys.first;
+  for (final y in ys.skip(1)) {
+    if (y - rowY > tol) {
+      rows++;
+      rowY = y;
+    }
+  }
+  return rows;
 }
 
 List<PdfWord> _sortedByX(List<PdfWord> words) =>

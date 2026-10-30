@@ -1,0 +1,2001 @@
+diff --git a/lib/main.dart b/lib/main.dart
+index c244b93..622df44 100644
+--- a/lib/main.dart
++++ b/lib/main.dart
+@@ -4,6 +4,7 @@ import 'dart:convert';
+ import 'dart:io';
+ 
+ import 'package:flutter/material.dart';
++import 'package:pdfrx/pdfrx.dart';
+ import 'package:receive_sharing_intent/receive_sharing_intent.dart';
+ 
+ import 'app.dart';
+@@ -14,6 +15,9 @@ import 'services/biblioteca_export.dart';
+ 
+ void main() async {
+   WidgetsFlutterBinding.ensureInitialized();
++  // PDFium (lectura de PDF con la posición real de cada letra): hay que
++  // inicializarlo antes de usar la API de documentos fuera de un visor.
++  pdfrxFlutterInitialize();
+   final store = Store();
+   await store.load();
+   runApp(MyApp(store: store));
+diff --git a/lib/models/song.dart b/lib/models/song.dart
+index 714957d..bd3e8b5 100644
+--- a/lib/models/song.dart
++++ b/lib/models/song.dart
+@@ -33,7 +33,7 @@ class Song {
+   String? timeSignature;
+ 
+   /// Por cada campo de metadatos, de dónde viene su valor:
+-  /// 'acordes' (detectado offline), 'api' (GetSongBPM/MusicBrainz), 'tap' (tap tempo), 'manual'.
++  /// 'acordes' (detectado offline), 'api' (histórico, ya no se usa), 'tap' (tap tempo), 'manual'.
+   /// Claves: 'author', 'key', 'bpm', 'timeSignature'.
+   Map<String, String>? metadataSource;
+ 
+diff --git a/lib/models/song_metadata_suggestion.dart b/lib/models/song_metadata_suggestion.dart
+deleted file mode 100644
+index 4a31b06..0000000
+--- a/lib/models/song_metadata_suggestion.dart
++++ /dev/null
+@@ -1,80 +0,0 @@
+-/// Resultado de una sugerencia de metadatos para una canción.
+-/// Cada campo trae su valor, la fuente y una confianza (0.0 - 1.0).
+-/// Nunca se guarda a ciegas: el usuario confirma o edita.
+-
+-enum MetadataSource { chords, api, tap, manual }
+-
+-String metadataSourceLabel(MetadataSource s) {
+-  switch (s) {
+-    case MetadataSource.chords:
+-      return 'Detectado por acordes';
+-    case MetadataSource.api:
+-      return 'GetSongBPM / MusicBrainz';
+-    case MetadataSource.tap:
+-      return 'Tap tempo';
+-    case MetadataSource.manual:
+-      return 'Introducido manualmente';
+-  }
+-}
+-
+-/// Un campo con su sugerencia, fuente y confianza.
+-class FieldSuggestion<T> {
+-  final T value;
+-  final MetadataSource source;
+-  final double confidence; // 0.0 - 1.0
+-
+-  const FieldSuggestion(this.value, this.source, this.confidence);
+-}
+-
+-/// Candidato devuelto por una API online (para elegir entre varios).
+-class SongCandidate {
+-  final String title;
+-  final String? artist;
+-  final String? key;
+-  final int? bpm;
+-  final String? timeSignature;
+-  final String source; // 'getsongbpm' | 'musicbrainz'
+-  final String externalId;
+-
+-  SongCandidate({
+-    required this.title,
+-    this.artist,
+-    this.key,
+-    this.bpm,
+-    this.timeSignature,
+-    required this.source,
+-    required this.externalId,
+-  });
+-}
+-
+-/// Sugerencia completa de metadatos para una canción.
+-class SongMetadataSuggestion {
+-  final FieldSuggestion<String>? key;        // ej. "C#m"
+-  final FieldSuggestion<int>? bpm;
+-  final FieldSuggestion<String>? artist;
+-  final FieldSuggestion<String>? timeSignature; // ej. "4/4"
+-  final List<SongCandidate> candidates;
+-
+-  const SongMetadataSuggestion({
+-    this.key,
+-    this.bpm,
+-    this.artist,
+-    this.timeSignature,
+-    this.candidates = const [],
+-  });
+-
+-  /// Si hay alguna sugerencia disponible.
+-  bool get hasAny =>
+-      key != null || bpm != null || artist != null || timeSignature != null;
+-
+-  /// Combina esta sugerencia con otra (esta tiene prioridad en los campos que tiene).
+-  SongMetadataSuggestion mergeWith(SongMetadataSuggestion other) {
+-    return SongMetadataSuggestion(
+-      key: key ?? other.key,
+-      bpm: bpm ?? other.bpm,
+-      artist: artist ?? other.artist,
+-      timeSignature: timeSignature ?? other.timeSignature,
+-      candidates: [...other.candidates, ...candidates],
+-    );
+-  }
+-}
+diff --git a/lib/screens/home/library_screen.dart b/lib/screens/home/library_screen.dart
+index 8bea08b..6a8de21 100644
+--- a/lib/screens/home/library_screen.dart
++++ b/lib/screens/home/library_screen.dart
+@@ -12,6 +12,7 @@ import '../../data/format.dart';
+ import '../../data/store.dart';
+ import '../../models/app_state.dart';
+ import '../../models/song.dart';
++import '../../services/pdf_chordpro/pdf_import.dart';
+ import '../../services/pdf_chordpro/pdf_to_chordpro_service.dart';
+ import '../song/pdf_review_page.dart';
+ import '../../theme.dart';
+@@ -98,7 +99,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
+     List<PdfConversion> conversions;
+     try {
+       // Se ejecuta en un isolate aparte: la UI no se bloquea aunque el PDF sea grande.
+-      conversions = await const PdfToChordProService().convertAllAsync(bytes, fallbackTitle: base);
++      conversions = await importPdfAll(bytes, fallbackTitle: base);
+     } catch (_) {
+       conversions = const [];
+     }
+diff --git a/lib/screens/settings/legal_screen.dart b/lib/screens/settings/legal_screen.dart
+index 254dd63..364886b 100644
+--- a/lib/screens/settings/legal_screen.dart
++++ b/lib/screens/settings/legal_screen.dart
+@@ -45,13 +45,10 @@ extension LegalTopicInfo on LegalTopic {
+                 'abierto. El componente de generación de PDF (Syncfusion '
+                 'Flutter PDF) se utiliza bajo los términos de su propio '
+                 'acuerdo de licencia.',
+-            'Datos de tempo y tono',
+-            'La función de autocompletar de metadatos puede consultar el '
+-                'servicio gratuito GetSongBPM (https://getsongbpm.com) para '
+-                'obtener sugerencias de tono, BPM y autor. GetSongBPM es un '
+-                'servicio independiente; Songkey no está afiliado con él. '
+-                'Todas las consultas son opcionales y se pueden deshabilitar '
+-                'si no se dispone de clave de API.',
++            'Detección de tono',
++            'La tonalidad sugerida se calcula en tu dispositivo a partir de '
++                'los acordes de la canción. Es solo una sugerencia y puedes '
++                'cambiarla en cualquier momento.',
+             'Responsabilidad',
+             'La aplicación se ofrece "tal cual", sin garantías de ningún '
+                 'tipo. No nos hacemos responsables del uso que se dé al '
+diff --git a/lib/screens/song/song_editor_page.dart b/lib/screens/song/song_editor_page.dart
+index edc9438..a032a50 100644
+--- a/lib/screens/song/song_editor_page.dart
++++ b/lib/screens/song/song_editor_page.dart
+@@ -11,11 +11,7 @@ import '../../data/store.dart';
+ import '../../models/app_state.dart';
+ import '../../models/setlist.dart';
+ import '../../models/song.dart';
+-import '../../models/song_metadata_suggestion.dart';
+ import '../../services/metadata/chord_key_detector.dart';
+-import '../../services/metadata/getsongbpm_client.dart';
+-import '../../services/metadata/musicbrainz_client.dart';
+-import '../../services/metadata/song_metadata_service.dart';
+ import 'widgets/pdf_import_button.dart';
+ import 'song_editor_tabs.dart';
+ import 'structure_tab.dart';
+@@ -47,11 +43,8 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
+   List<String>? _structure;
+   late TabController _tabCtrl;
+ 
+-  /// Servicio de metadatos (detección offline + APIs online).
+-  late final SongMetadataService _metaService;
+-
+-  /// Estado de carga para el autocompletar.
+-  bool _metaLoading = false;
++  /// Detector de tonalidad a partir de los acordes (offline).
++  final ChordKeyDetector _keyDetector = ChordKeyDetector();
+ 
+   /// true mientras el cambio de texto viene del editor visual: as no se
+   /// reconstruye el editor con su propio resultado.
+@@ -78,79 +71,21 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
+     fill(timeSignature, meta.time);
+   }
+ 
+-  /// Autocompleta metadatos (tono, BPM, autor, compás) desde acordes y APIs online.
+-  /// Nunca sobrescribe campos que el usuario ya haya llenado.
+-  Future<void> _autoCompletar() async {
+-    final t = title.text.trim();
+-    if (t.isEmpty) {
+-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Escribe un título primero')));
+-      return;
+-    }
+-    setState(() => _metaLoading = true);
+-    try {
+-      final existente = {
+-        'key': key.text.trim().isEmpty ? null : key.text.trim(),
+-        'author': author.text.trim().isEmpty ? null : author.text.trim(),
+-        'bpm': bpm.text.trim().isEmpty ? null : bpm.text.trim(),
+-        'timeSignature': timeSignature.text.trim().isEmpty ? null : timeSignature.text.trim(),
+-      };
+-      final sugerencia = await _metaService.sugerir(
+-        titulo: t,
+-        chordProText: body.text.isNotEmpty ? body.text : null,
+-        existing: existente,
+-        consultarOnline: true,
+-      );
+-
+-      // Aplicar solo campos vacíos (nunca sobrescribir).
+-      setState(() {
+-        if (sugerencia.key != null && key.text.trim().isEmpty) {
+-          key.text = sugerencia.key!.value;
+-        }
+-        if (sugerencia.bpm != null && bpm.text.trim().isEmpty) {
+-          bpm.text = sugerencia.bpm!.value.toString();
+-        }
+-        if (sugerencia.timeSignature != null && timeSignature.text.trim().isEmpty) {
+-          timeSignature.text = sugerencia.timeSignature!.value;
+-        }
+-      });
+-
+-      // Artista: si hay varios candidatos con artistas distintos, deja que el
+-      // usuario elija en vez de auto-completar con uno posiblemente erróneo.
+-      if (author.text.trim().isEmpty && sugerencia.candidates.isNotEmpty) {
+-        final artistasDistintos = sugerencia.candidates
+-            .where((c) => c.artist != null && c.artist!.trim().isNotEmpty)
+-            .map((c) => c.artist!.trim())
+-            .toSet();
+-        if (artistasDistintos.length > 1) {
+-          if (mounted) {
+-            final elegido = await _seleccionarArtista(sugerencia.candidates);
+-            if (elegido != null && elegido.trim().isNotEmpty) {
+-              author.text = elegido;
+-            }
+-          }
+-        } else if (sugerencia.artist != null) {
+-          author.text = sugerencia.artist!.value;
+-        }
+-      }
+-
+-      if (mounted) {
+-        final partes = <String>[];
+-        if (sugerencia.key != null) partes.add('tono: ${sugerencia.key!.value}');
+-        if (sugerencia.bpm != null) partes.add('BPM: ${sugerencia.bpm!.value}');
+-        if (sugerencia.artist != null) partes.add('autor: ${sugerencia.artist!.value}');
+-        if (sugerencia.timeSignature != null) partes.add('compás: ${sugerencia.timeSignature!.value}');
+-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+-          content: Text(partes.isEmpty ? 'No se encontraron metadatos' : 'Sugerido: ${partes.join(', ')}'),
+-          duration: const Duration(seconds: 4),
+-        ));
+-      }
+-    } catch (_) {
+-      if (mounted) {
+-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se pudo autocompletar')));
+-      }
+-    } finally {
+-      if (mounted) setState(() => _metaLoading = false);
++  /// Detecta la tonalidad a partir de los acordes del texto (offline, sin
++  /// internet) y la pone en el campo "Tono". Lo dispara el usuario con el botón.
++  void _detectarTono() {
++    final texto = body.text;
++    final det = texto.trim().isEmpty ? null : _keyDetector.detect(texto);
++    final detectado = (det != null && det.key != null && det.confidence >= 0.3) ? det.key! : null;
++    if (detectado != null) {
++      setState(() => key.text = detectado);
+     }
++    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
++      content: Text(detectado != null
++          ? 'Tono detectado por los acordes: $detectado'
++          : 'No hay acordes suficientes para detectar el tono'),
++      duration: const Duration(seconds: 3),
++    ));
+   }
+ 
+   @override
+@@ -162,12 +97,6 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
+     author = TextEditingController(text: widget.song?.author ?? '');
+     body = TextEditingController(text: widget.song?.body ?? widget.initialBody ?? '');
+     timeSignature = TextEditingController(text: widget.song?.timeSignature ?? '');
+-    // Servicio de metadatos: GetSongBPM key via --dart-define (vacío = sin API online).
+-    final gsbKey = String.fromEnvironment('GETSONGBPM_KEY');
+-    _metaService = SongMetadataService(
+-      getsongbpm: GetSongBpmClient(apiKey: gsbKey),
+-      musicbrainz: MusicBrainzClient(),
+-    );
+     // Canciones antiguas sin author/bpm guardados: se sacan de las directivas.
+     if (widget.song != null) _syncMetaFromBody();
+     _bodyInicial = body.text;
+@@ -252,18 +181,11 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
+                   child: TextField(controller: title, decoration: const InputDecoration(labelText: 'Título')),
+                 ),
+                 const SizedBox(width: 6),
+-                if (!_metaLoading)
+-                  OutlinedButton(
+-                    onPressed: _autoCompletar,
+-                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
+-                    child: const Text('Auto', style: TextStyle(fontSize: 12)),
+-                  )
+-                else
+-                  const SizedBox(
+-                    width: 28,
+-                    height: 28,
+-                    child: CircularProgressIndicator(strokeWidth: 2),
+-                  ),
++                OutlinedButton(
++                  onPressed: _detectarTono,
++                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
++                  child: const Text('Tono', style: TextStyle(fontSize: 12)),
++                ),
+               ]),
+               const SizedBox(height: 12),
+               TextField(controller: author, decoration: const InputDecoration(labelText: 'Autor (opcional)')),
+@@ -337,55 +259,6 @@ class _SongEditorPageState extends State<SongEditorPage> with SingleTickerProvid
+     }
+   }
+ 
+-  /// Muestra un diálogo para que el usuario elija el artista correcto entre
+-  /// los candidatos devueltos por las APIs. Devuelve el artista elegido o null
+-  /// si canceló.
+-  Future<String?> _seleccionarArtista(List<SongCandidate> candidates) async {
+-    final conArtista = candidates
+-        .where((c) => c.artist != null && c.artist!.trim().isNotEmpty)
+-        .toList();
+-    if (conArtista.isEmpty) return null;
+-
+-    // Elimina duplicados manteniendo el orden.
+-    final vistos = <String>{};
+-    final unicos = <SongCandidate>[];
+-    for (final c in conArtista) {
+-      final a = c.artist!.trim();
+-      if (vistos.add(a)) unicos.add(c);
+-    }
+-
+-    return showDialog<String>(
+-      context: context,
+-      builder: (_) => AlertDialog(
+-        title: const Text('Elige el artista'),
+-        content: SizedBox(
+-          width: double.maxFinite,
+-          child: ListView.builder(
+-            shrinkWrap: true,
+-            itemCount: unicos.length,
+-            itemBuilder: (_, i) {
+-              final c = unicos[i];
+-              final subtitle = c.source == 'getsongbpm' ? 'GetSongBPM' : 'MusicBrainz';
+-              return ListTile(
+-                title: Text(c.artist!),
+-                subtitle: Text('${c.title} (${subtitle})', style: const TextStyle(fontSize: 11)),
+-                onTap: () => Navigator.pop(_, c.artist),
+-              );
+-            },
+-          ),
+-        ),
+-        actions: [
+-          TextButton(onPressed: () => Navigator.pop(_), child: const Text('Cancelar')),
+-          if (unicos.length == 1)
+-            FilledButton(
+-              onPressed: () => Navigator.pop(_, unicos.first.artist),
+-              child: const Text('Usar'),
+-            ),
+-        ],
+-      ),
+-    );
+-  }
+-
+   /// Deja el cuerpo como lo escribi el usuario y solo pone al principio las
+   /// directivas de metadatos (quitando las que ya hubiera, para no duplicar).
+   String _cuerpoConMetadatos({
+diff --git a/lib/screens/song/widgets/pdf_import_button.dart b/lib/screens/song/widgets/pdf_import_button.dart
+index 6fdd1a2..9d505d0 100644
+--- a/lib/screens/song/widgets/pdf_import_button.dart
++++ b/lib/screens/song/widgets/pdf_import_button.dart
+@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
+ import 'package:flutter/material.dart';
+ 
+ import '../../../data/store.dart';
++import '../../../services/pdf_chordpro/pdf_import.dart';
+ import '../../../services/pdf_chordpro/pdf_to_chordpro_service.dart';
+ import '../pdf_review_page.dart';
+ import '../pdf_format_help_page.dart';
+@@ -31,7 +32,7 @@ class PdfImportButton extends StatelessWidget {
+     PdfConversion conversion;
+     try {
+       // Se ejecuta en un isolate aparte: la UI no se bloquea aunque el PDF sea grande.
+-      conversion = await const PdfToChordProService().convertAsync(bytes, fallbackTitle: file.name.replaceAll(RegExp(r'\.pdf$', caseSensitive: false), ''));
++      conversion = await importPdf(bytes, fallbackTitle: file.name.replaceAll(RegExp(r'\.pdf$', caseSensitive: false), ''));
+     } catch (_) {
+       if (context.mounted) Navigator.of(context).pop();
+       if (context.mounted) {
+diff --git a/lib/services/metadata/getsongbpm_client.dart b/lib/services/metadata/getsongbpm_client.dart
+deleted file mode 100644
+index f5fb413..0000000
+--- a/lib/services/metadata/getsongbpm_client.dart
++++ /dev/null
+@@ -1,119 +0,0 @@
+-import 'dart:convert';
+-import 'package:http/http.dart' as http;
+-
+-import '../../models/song_metadata_suggestion.dart';
+-
+-/// Cliente de GetSongBPM (https://api.getsongbpm.com).
+-///
+-/// Busca canciones por título y devuelve tempo, tonalidad y compás si están disponibles.
+-/// Todas las fallas se silencian (degradación silenciosa): la UI nunca recibe una excepción.
+-class GetSongBpmClient {
+-  final String apiKey;
+-  final String? proxyUrl;
+-
+-  GetSongBpmClient({required this.apiKey, this.proxyUrl});
+-
+-  /// Base URL de la API (o proxy si está configurado).
+-  String get _base => proxyUrl ?? 'https://api.getsongbpm.com';
+-
+-  /// Busca canciones por título. Devuelve hasta [limit] candidatos.
+-  Future<List<SongCandidate>> search(String title) async {
+-    if (apiKey.isEmpty && proxyUrl == null) return [];
+-    try {
+-      final url = '${_base}/search/?api_key=$apiKey&type=song&lookup=${Uri.encodeComponent(title)}&limit=8';
+-      final response = await _httpGet(url, timeoutSeconds: 8);
+-      if (response == null) return [];
+-      return _parseSearch(response);
+-    } catch (_) {
+-      return [];
+-    }
+-  }
+-
+-  /// Obtiene el detalle de una canción por su ID externo.
+-  Future<SongCandidate?> songById(String externalId) async {
+-    if (apiKey.isEmpty && proxyUrl == null) return null;
+-    try {
+-      final url = '${_base}/song/?api_key=$apiKey&id=$externalId';
+-      final response = await _httpGet(url, timeoutSeconds: 8);
+-      if (response == null) return null;
+-      return _parseSongDetail(response, externalId);
+-    } catch (_) {
+-      return null;
+-    }
+-  }
+-
+-  /// Petición HTTP genérica con timeout. Devuelve null en cualquier error.
+-  Future<Map<String, dynamic>?> _httpGet(String url, {int timeoutSeconds = 8}) async {
+-    try {
+-      final response = await http.get(
+-        Uri.parse(url),
+-        headers: {'Accept': 'application/json'},
+-      ).timeout(Duration(seconds: timeoutSeconds));
+-      if (response.statusCode != 200) return null;
+-      return jsonDecode(response.body) as Map<String, dynamic>;
+-    } catch (_) {
+-      return null;
+-    }
+-  }
+-
+-  List<SongCandidate> _parseSearch(Map<String, dynamic> data) {
+-    final candidates = <SongCandidate>[];
+-    // La respuesta de búsqueda puede tener distintas estructuras según la versión de la API.
+-    // Intentamos los campos más comunes.
+-    final results = _extractList(data);
+-    for (final item in results) {
+-      if (item is! Map<String, dynamic>) continue;
+-      final title = _str(item, 'title') ?? _str(item, 'song') ?? '';
+-      if (title.isEmpty) continue;
+-      candidates.add(SongCandidate(
+-        title: title,
+-        artist: _str(item, 'artist') ?? _str(item, 'artist_name'),
+-        key: _str(item, 'key') ?? _str(item, 'key_of'),
+-        bpm: _int(item, 'tempo') ?? _int(item, 'bpm'),
+-        timeSignature: _str(item, 'time_signature') ?? _str(item, 'time'),
+-        source: 'getsongbpm',
+-        externalId: _str(item, 'id') ?? _str(item, 'song_id') ?? '',
+-      ));
+-    }
+-    return candidates;
+-  }
+-
+-  SongCandidate? _parseSongDetail(Map<String, dynamic> data, String externalId) {
+-    final title = _str(data, 'title') ?? '';
+-    if (title.isEmpty) return null;
+-    return SongCandidate(
+-      title: title,
+-      artist: _str(data, 'artist') ?? _str(data, 'artist_name'),
+-      key: _str(data, 'key') ?? _str(data, 'key_of'),
+-      bpm: _int(data, 'tempo') ?? _int(data, 'bpm'),
+-      timeSignature: _str(data, 'time_signature') ?? _str(data, 'time'),
+-      source: 'getsongbpm',
+-      externalId: externalId,
+-    );
+-  }
+-
+-  /// Extrae la lista de resultados de la respuesta (soporta distintas estructuras).
+-  List<dynamic> _extractList(Map<String, dynamic> data) {
+-    // Intentar claves comunes: 'songs', 'results', 'data', 'search_results'
+-    for (final key in ['songs', 'results', 'data', 'search_results']) {
+-      final v = data[key];
+-      if (v is List) return v;
+-    }
+-    // Si la respuesta es una lista directamente (envuelto)
+-    final allValues = data.values.whereType<List>();
+-    if (allValues.isNotEmpty) return allValues.first;
+-    return [];
+-  }
+-
+-  String? _str(Map<String, dynamic> m, String key) {
+-    final v = m[key];
+-    if (v == null) return null;
+-    return v.toString();
+-  }
+-
+-  int? _int(Map<String, dynamic> m, String key) {
+-    final v = m[key];
+-    if (v == null) return null;
+-    return int.tryParse(v.toString());
+-  }
+-}
+diff --git a/lib/services/metadata/musicbrainz_client.dart b/lib/services/metadata/musicbrainz_client.dart
+deleted file mode 100644
+index 7d69bb7..0000000
+--- a/lib/services/metadata/musicbrainz_client.dart
++++ /dev/null
+@@ -1,47 +0,0 @@
+-/// Cliente de MusicBrainz (https://musicbrainz.org/ws/2).
+-///
+-/// Busca el autor/artista de una grabación por título.
+-/// Respeta el límite de 1 petición por segundo mediante [RateLimiter].
+-/// Todas las fallas se silencian (degradación silenciosa).
+-import 'dart:convert';
+-import 'package:http/http.dart' as http;
+-import 'rate_limiter.dart';
+-
+-class MusicBrainzClient {
+-  final RateLimiter _rateLimiter;
+-  final String _userAgent;
+-
+-  MusicBrainzClient({RateLimiter? rateLimiter, String? userAgent})
+-      : _rateLimiter = rateLimiter ?? RateLimiter(),
+-        _userAgent = userAgent ?? 'SongKey/1.0 (contacto@tudominio.com)';
+-
+-  /// Busca el autor de una canción por título.
+-  /// Devuelve el nombre del artista o null si no se encuentra.
+-  Future<String?> searchArtist(String title) async {
+-    try {
+-      return await _rateLimiter.run(() async {
+-        final query = Uri.encodeComponent('recording:"$title"');
+-        final url = 'https://musicbrainz.org/ws/2/recording/?query=$query&fmt=json&limit=5';
+-        final response = await http.get(
+-          Uri.parse(url),
+-          headers: {'Accept': 'application/json', 'User-Agent': _userAgent},
+-        ).timeout(const Duration(seconds: 8));
+-        if (response.statusCode != 200) return null;
+-        final data = jsonDecode(response.body) as Map<String, dynamic>;
+-        final recordings = data['recordings'];
+-        if (recordings == null || recordings is! List) return null;
+-        if (recordings.isEmpty) return null;
+-        final first = recordings.first as Map<String, dynamic>;
+-        final artistCredit = first['artist-credit'];
+-        if (artistCredit == null || artistCredit is! List) return null;
+-        if (artistCredit.isEmpty) return null;
+-        final firstCredit = artistCredit.first as Map<String, dynamic>;
+-        final artist = firstCredit['artist'];
+-        if (artist == null || artist is! Map) return null;
+-        return artist['name'] as String?;
+-      });
+-    } catch (_) {
+-      return null;
+-    }
+-  }
+-}
+diff --git a/lib/services/metadata/rate_limiter.dart b/lib/services/metadata/rate_limiter.dart
+deleted file mode 100644
+index 2c67e4f..0000000
+--- a/lib/services/metadata/rate_limiter.dart
++++ /dev/null
+@@ -1,23 +0,0 @@
+-/// Limita la frecuencia de peticiones a un intervalo mínimo.
+-///
+-/// Usado por el cliente de MusicBrainz (máximo 1 petición por segundo).
+-class RateLimiter {
+-  final Duration minInterval;
+-  DateTime? _lastCall;
+-
+-  /// [minInterval] tiempo mínimo entre peticiones (por defecto 1 segundo).
+-  RateLimiter({Duration minInterval = const Duration(seconds: 1)})
+-      : minInterval = minInterval;
+-
+-  /// Ejecuta [action] esperando si es necesario para respetar el intervalo.
+-  Future<T> run<T>(Future<T> Function() action) async {
+-    if (_lastCall != null) {
+-      final elapsed = DateTime.now().difference(_lastCall!);
+-      if (elapsed < minInterval) {
+-        await Future.delayed(minInterval - elapsed);
+-      }
+-    }
+-    _lastCall = DateTime.now();
+-    return action();
+-  }
+-}
+diff --git a/lib/services/metadata/song_metadata_service.dart b/lib/services/metadata/song_metadata_service.dart
+deleted file mode 100644
+index 0224358..0000000
+--- a/lib/services/metadata/song_metadata_service.dart
++++ /dev/null
+@@ -1,164 +0,0 @@
+-import 'chord_key_detector.dart';
+-import 'getsongbpm_client.dart';
+-import 'musicbrainz_client.dart';
+-import '../../models/song_metadata_suggestion.dart';
+-
+-/// Orquestador de sugerencias de metadatos de canciones.
+-///
+-/// Combina fuentes offline (detecto de tonalidad por acordes, tap tempo)
+-/// con fuentes online (GetSongBPM, MusicBrainz) respetando:
+-/// 1. Nunca sobrescribir campos que el usuario ya llenó.
+-/// 2. Caché negativa: no volver a consultar un título fallido por 30 días.
+-/// 3. Degradación silenciosa: sin internet o error, solo se omite la parte online.
+-class SongMetadataService {
+-  final ChordKeyDetector _chordKeyDetector = ChordKeyDetector();
+-  final GetSongBpmClient _getsongbpm;
+-  final MusicBrainzClient _musicbrainz;
+-
+-  /// Caché negativa: título normalizado → fecha de la última consulta fallida.
+-  /// Si pasó menos de 30 días, no se vuelve a consultar.
+-  final Map<String, DateTime> _negativeCache = {};
+-
+-  SongMetadataService({
+-    required GetSongBpmClient getsongbpm,
+-    required MusicBrainzClient musicbrainz,
+-  })  : _getsongbpm = getsongbpm,
+-        _musicbrainz = musicbrainz;
+-
+-  /// Debounce en ms para consultas automáticas al escribir el título.
+-  static const debounceMs = 700;
+-
+-  /// Dias de caché negativa.
+-  static const negativeCacheDays = 30;
+-
+-  /// Genera una sugerencia de metadatos para una canción.
+-  ///
+-  /// [titulo] título de la canción (para consultar online).
+-  /// [chordProText] texto ChordPro (para detectar tono offline).
+-  /// [existing] campos ya llenos por el usuario (no se sobrescriben).
+-  /// [consultarOnline] si se permite hacer peticiones HTTP.
+-  Future<SongMetadataSuggestion> sugerir({
+-    required String titulo,
+-    String? chordProText,
+-    required Map<String, String?> existing, // campo → valor actual (null si vacío)
+-    bool consultarOnline = true,
+-  }) async {
+-    // Toque manual del botón "Auto": siempre reintenta, aunque el título
+-    // tenga caché negativa de un intento fallido previo.
+-    _negativeCache.remove(titulo.trim().toLowerCase());
+-
+-    var suggestion = SongMetadataSuggestion();
+-
+-    // 1. Offline: detección de tonalidad por acordes.
+-    if (existing['key'] == null || existing['key']!.isEmpty) {
+-      if (chordProText != null && chordProText.isNotEmpty) {
+-        final det = _chordKeyDetector.detect(chordProText);
+-        if (det.key != null && det.confidence >= 0.3) {
+-          suggestion = suggestion.mergeWith(SongMetadataSuggestion(
+-            key: FieldSuggestion(det.key!, MetadataSource.chords, det.confidence),
+-          ));
+-        }
+-      }
+-    }
+-
+-    // 2. Online: si faltan campos y hay conexión y no hay caché negativa vigente.
+-    if (consultarOnline && _shouldQueryOnline(titulo, existing)) {
+-      try {
+-        final apiResult = await _queryApis(titulo, existing);
+-        suggestion = suggestion.mergeWith(apiResult);
+-      } catch (_) {
+-        // Silenciar errores online.
+-      }
+-      // Marcar caché negativa aunque no haya resultados (para no re-consultar).
+-      _negativeCache[titulo.trim().toLowerCase()] = DateTime.now();
+-    }
+-
+-    return suggestion;
+-  }
+-
+-  /// Si se debe consultar online para este título.
+-  bool _shouldQueryOnline(String titulo, Map<String, String?> existing) {
+-    final tieneFaltantes = existing.values.any((v) => v == null || v!.isEmpty);
+-    if (!tieneFaltantes) return false; // Todo lleno, no hace falta.
+-
+-    final key = titulo.trim().toLowerCase();
+-    final ultima = _negativeCache[key];
+-    if (ultima != null) {
+-      final dias = DateTime.now().difference(ultima).inDays;
+-      if (dias < negativeCacheDays) return false; // Caché negativa vigente.
+-    }
+-    return true;
+-  }
+-
+-  /// Consulta GetSongBPM y MusicBrainz en paralelo, respetando los campos faltantes.
+-  Future<SongMetadataSuggestion> _queryApis(
+-      String titulo, Map<String, String?> existing) async {
+-    var suggestion = SongMetadataSuggestion();
+-    final needsArtist = existing['author'] == null || existing['author']!.isEmpty;
+-    final needsKey = existing['key'] == null || existing['key']!.isEmpty;
+-    final needsBpm = existing['bpm'] == null;
+-    final needsTime = existing['timeSignature'] == null || existing['timeSignature']!.isEmpty;
+-
+-    // Búsqueda en GetSongBPM (si necesitamos al menos un campo).
+-    SongCandidate? gsbCandidate;
+-    if (needsArtist || needsKey || needsBpm || needsTime) {
+-      try {
+-        final candidates = await _getsongbpm.search(titulo);
+-        if (candidates.isNotEmpty) {
+-          gsbCandidate = candidates.first;
+-          suggestion = suggestion.mergeWith(SongMetadataSuggestion(
+-            candidates: candidates,
+-          ));
+-        }
+-      } catch (_) {}
+-    }
+-
+-    // Detalle de la canción en GetSongBPM (si hay candidato y necesitamos más datos).
+-    if (gsbCandidate != null && (needsKey || needsBpm || needsTime)) {
+-      try {
+-        final detail = await _getsongbpm.songById(gsbCandidate.externalId);
+-        if (detail != null) {
+-          if (needsKey && detail.key != null && detail.key!.isNotEmpty) {
+-            suggestion = suggestion.mergeWith(SongMetadataSuggestion(
+-              key: FieldSuggestion(detail.key!, MetadataSource.api, 0.7),
+-            ));
+-          }
+-          if (needsBpm && detail.bpm != null) {
+-            suggestion = suggestion.mergeWith(SongMetadataSuggestion(
+-              bpm: FieldSuggestion(detail.bpm!, MetadataSource.api, 0.8),
+-            ));
+-          }
+-          if (needsTime && detail.timeSignature != null && detail.timeSignature!.isNotEmpty) {
+-            suggestion = suggestion.mergeWith(SongMetadataSuggestion(
+-              timeSignature: FieldSuggestion(
+-                  detail.timeSignature!, MetadataSource.api, 0.7),
+-            ));
+-          }
+-        }
+-      } catch (_) {}
+-    }
+-
+-    // MusicBrainz para el autor (si lo necesitamos y no lo tenemos de GSB).
+-    if (needsArtist && (gsbCandidate?.artist == null || gsbCandidate!.artist!.isEmpty)) {
+-      try {
+-        final artist = await _musicbrainz.searchArtist(titulo);
+-        if (artist != null && artist.isNotEmpty) {
+-          suggestion = suggestion.mergeWith(SongMetadataSuggestion(
+-            artist: FieldSuggestion(artist, MetadataSource.api, 0.6),
+-          ));
+-        }
+-      } catch (_) {}
+-    } else if (needsArtist && gsbCandidate?.artist != null) {
+-      suggestion = suggestion.mergeWith(SongMetadataSuggestion(
+-        artist: FieldSuggestion(gsbCandidate!.artist!, MetadataSource.api, 0.7),
+-      ));
+-    }
+-
+-    return suggestion;
+-  }
+-
+-  /// Limpia la caché negativa de un título (para permitir reintentar).
+-  void clearNegativeCache(String titulo) {
+-    _negativeCache.remove(titulo.trim().toLowerCase());
+-  }
+-}
+diff --git a/lib/services/metadata/tap_tempo.dart b/lib/services/metadata/tap_tempo.dart
+deleted file mode 100644
+index 72dc129..0000000
+--- a/lib/services/metadata/tap_tempo.dart
++++ /dev/null
+@@ -1,46 +0,0 @@
+-/// Calcula BPM a partir de toques del usuario (tap tempo).
+-///
+-/// Funciona 100% offline. Registra los instantes de cada toque y calcula
+-/// el BPM como 60000 / promedio de los intervalos usando los últimos 6-8 toques.
+-/// Requiere mínimo 3 toques para dar resultado.
+-/// Reinicia la serie si pasan más de 2 segundos desde el último toque.
+-class TapTempo {
+-  static const _maxIntervalMs = 2000; // reiniciar si pasa más de 2 s
+-  static const _minTaps = 3;          // mínimo de toques para dar resultado
+-  static const _maxTaps = 8;          // usar los últimos N toques
+-  static const _bpmMin = 30;
+-  static const _bpmMax = 300;
+-
+-  final List<DateTime> _taps = [];
+-
+-  /// Registra un toque en el instante actual.
+-  void tap() {
+-    final now = DateTime.now();
+-    if (_taps.isNotEmpty &&
+-        now.difference(_taps.last).inMilliseconds > _maxIntervalMs) {
+-      _taps.clear();
+-    }
+-    _taps.add(now);
+-    if (_taps.length > _maxTaps) _taps.removeAt(0);
+-  }
+-
+-  /// Devuelve el BPM calculado o null si no hay suficientes toques.
+-  int? get bpm {
+-    if (_taps.length < _minTaps) return null;
+-    final intervals = <int>[];
+-    for (var i = 1; i < _taps.length; i++) {
+-      intervals.add(_taps[i].difference(_taps[i - 1]).inMilliseconds);
+-    }
+-    final avg = intervals.reduce((a, b) => a + b) / intervals.length;
+-    if (avg <= 0) return null;
+-    var bpm = (60000 / avg).round();
+-    bpm = bpm.clamp(_bpmMin, _bpmMax);
+-    return bpm;
+-  }
+-
+-  /// Número de toques registrados.
+-  int get tapCount => _taps.length;
+-
+-  /// Reinicia la serie de toques.
+-  void reset() => _taps.clear();
+-}
+diff --git a/lib/services/pdf_chordpro/char_boxes.dart b/lib/services/pdf_chordpro/char_boxes.dart
+new file mode 100644
+index 0000000..2925600
+--- /dev/null
++++ b/lib/services/pdf_chordpro/char_boxes.dart
+@@ -0,0 +1,187 @@
++// De cajas de caracteres (como las da PDFium) a palabras con posición real.
++//
++// Por qué existe: para el PDF de "Serviremos al Señor" Syncfusion devuelve
++// coordenadas que NO corresponden a la página (texto con tamaño de fuente 1.0
++// escalado por matriz: las filas de acordes y de letra salen fundidas y la X de
++// cada acorde es inventada). PDFium (el motor de Chrome) sí da la caja real de
++// cada carácter; con eso cada acorde queda exactamente sobre su sílaba.
++//
++// Dart puro (sin Flutter ni pdfrx): el adaptador que lee el PDF está aparte
++// (pdfium_extractor.dart) y este archivo se puede probar con datos a mano.
++library;
++
++import 'dart:math' as math;
++
++import 'pdf_models.dart';
++
++/// Un carácter del PDF con su caja en coordenadas de página con origen ARRIBA
++/// a la izquierda (Y crece hacia abajo, como en el resto del importador).
++class PdfCharBox {
++  final String ch;
++  final double left;
++  final double top;
++  final double right;
++  final double bottom;
++  final int page;
++
++  const PdfCharBox({
++    required this.ch,
++    required this.left,
++    required this.top,
++    required this.right,
++    required this.bottom,
++    this.page = 0,
++  });
++
++  double get width => right - left;
++  double get height => bottom - top;
++  double get centerY => (top + bottom) / 2;
++
++  /// Pasa de coordenadas PDF (origen abajo-izquierda, `top > bottom`) a las del
++  /// importador. [pageHeight] es el alto de la página en puntos.
++  factory PdfCharBox.fromPdfRect({
++    required String ch,
++    required double left,
++    required double top,
++    required double right,
++    required double bottom,
++    required double pageHeight,
++    int page = 0,
++  }) =>
++      PdfCharBox(
++        ch: ch,
++        left: left,
++        top: pageHeight - top,
++        right: right,
++        bottom: pageHeight - bottom,
++        page: page,
++      );
++}
++
++/// Fracción de la altura mediana que puede separar los centros de dos
++/// caracteres de la misma fila (acentos y letras con cola varían hasta ~3 pt;
++/// dos filas distintas están a 12 pt o más).
++const double charRowTolerance = 0.6;
++
++/// Un hueco mayor que esta fracción del ancho mediano de un carácter separa
++/// dos palabras. Las cajas de PDFium van ajustadas al glifo, así que entre
++/// letras de una misma palabra queda hasta ~0.37 del ancho mediano (letras
++/// estrechas como i, l, u), mientras que entre palabras hay al menos ~0.58.
++const double charWordGap = 0.47;
++
++/// Relación aproximada entre la altura de la caja de un glifo y el tamaño de la
++/// fuente (la caja de PDFium es "ajustada" al glifo).
++const double _glyphHeightToFontSize = 1.25;
++
++/// Convierte [chars] (de una o varias páginas) en palabras con `left`/`right`
++/// reales y la X de cada letra en `glyphLefts`.
++///
++/// - Espacios y saltos de línea no se usan como caracteres (los espacios de
++///   PDFium tienen altura ~0, así que no sirven para ubicar la fila), pero sí
++///   como señal: un espacio entre dos letras consecutivas corta la palabra.
++///   Además se corta por el hueco entre letras ([charWordGap]).
++/// - Las filas se forman por la posición vertical de los caracteres.
++List<PdfWord> wordsFromChars(List<PdfCharBox> chars) {
++  final byPage = <int, List<_Ch>>{};
++  var spaceSeen = false;
++  _Ch? prev;
++  for (final c in chars) {
++    if (c.ch.trim().isEmpty) {
++      // Un espacio / salto entre dos letras visibles consecutivas.
++      spaceSeen = true;
++      continue;
++    }
++    if (c.width <= 0 || c.height <= 0) continue;
++    final item = _Ch(c, spaceBefore: spaceSeen && prev != null && prev.box.page == c.page, prev: prev);
++    byPage.putIfAbsent(c.page, () => []).add(item);
++    prev = item;
++    spaceSeen = false;
++  }
++
++  final out = <PdfWord>[];
++  for (final page in byPage.keys.toList()..sort()) {
++    out.addAll(_wordsOfPage(byPage[page]!, page));
++  }
++  return out;
++}
++
++/// Carácter visible + si había un espacio entre él y el anterior (en el orden
++/// del PDF) y quién era ese anterior.
++class _Ch {
++  final PdfCharBox box;
++  final bool spaceBefore;
++  final _Ch? prev;
++  _Ch(this.box, {required this.spaceBefore, required this.prev});
++}
++
++double _median(List<double> v) {
++  final s = [...v]..sort();
++  final n = s.length;
++  return n.isOdd ? s[n ~/ 2] : (s[n ~/ 2 - 1] + s[n ~/ 2]) / 2;
++}
++
++List<PdfWord> _wordsOfPage(List<_Ch> items, int page) {
++  if (items.isEmpty) return const [];
++  final medH = _median([for (final c in items) c.box.height]);
++  final medW = _median([for (final c in items) c.box.width]);
++  final rowTol = medH * charRowTolerance;
++  final gap = medW * charWordGap;
++
++  // 1) Filas: por la posición vertical (centro) de cada carácter.
++  final sorted = [...items]..sort((a, b) => a.box.centerY.compareTo(b.box.centerY));
++  final rows = <List<_Ch>>[];
++  var lastY = double.negativeInfinity;
++  for (final c in sorted) {
++    if (rows.isEmpty || c.box.centerY - lastY > rowTol) {
++      rows.add([c]);
++    } else {
++      rows.last.add(c);
++    }
++    lastY = c.box.centerY;
++  }
++
++  // 2) Palabras de cada fila: de izquierda a derecha, cortando en los huecos.
++  final words = <PdfWord>[];
++  for (final row in rows) {
++    row.sort((a, b) => a.box.left.compareTo(b.box.left));
++    final rowFont = math.max(
++      _median([for (final c in row) c.box.height]) * _glyphHeightToFontSize,
++      6.0,
++    );
++
++    var current = <_Ch>[];
++    void flush() {
++      if (current.isEmpty) return;
++      final boxes = [for (final c in current) c.box];
++      words.add(PdfWord(
++        text: boxes.map((c) => c.ch).join(),
++        left: boxes.first.left,
++        top: boxes.map((c) => c.top).reduce(math.min),
++        right: boxes.map((c) => c.right).reduce(math.max),
++        bottom: boxes.map((c) => c.bottom).reduce(math.max),
++        fontSize: rowFont,
++        // Una X por unidad de texto (un carácter Unicode puede ser 2 unidades
++        // UTF-16): así glyphLefts.length == text.length, como espera el mapeador.
++        glyphLefts: [
++          for (final c in boxes)
++            for (var k = 0; k < c.ch.length; k++) c.left,
++        ],
++        page: page,
++      ));
++      current = <_Ch>[];
++    }
++
++    for (final c in row) {
++      if (current.isNotEmpty) {
++        final last = current.last;
++        final byGap = c.box.left - last.box.right > gap;
++        // El espacio solo cuenta si separa justo a estas dos letras.
++        final bySpace = c.spaceBefore && identical(c.prev, last);
++        if (byGap || bySpace) flush();
++      }
++      current.add(c);
++    }
++    flush();
++  }
++  return words;
++}
+diff --git a/lib/services/pdf_chordpro/pdf_import.dart b/lib/services/pdf_chordpro/pdf_import.dart
+new file mode 100644
+index 0000000..f782598
+--- /dev/null
++++ b/lib/services/pdf_chordpro/pdf_import.dart
+@@ -0,0 +1,47 @@
++// Punto de entrada para importar un PDF desde la interfaz.
++//
++// Primero se intenta con PDFium (posición real de cada carácter: cada acorde
++// queda exactamente sobre su sílaba). Si no se puede, se usa Syncfusion, que es
++// el camino anterior.
++//
++// Syncfusion falla con ciertos PDF (texto con fuente de tamaño 1.0 escalada por
++// matriz, como el de "Serviremos al Señor"): da coordenadas que no corresponden
++// a la página y los acordes no se pueden ubicar.
++import 'dart:typed_data';
++
++import 'pdf_to_chordpro_service.dart';
++import 'pdfium_extractor.dart';
++
++/// Convierte un PDF a ChordPro (una canción).
++Future<PdfConversion> importPdf(Uint8List bytes, {String? fallbackTitle}) async {
++  const service = PdfToChordProService();
++  final text = await extractCharsWithPdfium(bytes);
++  if (text != null) {
++    try {
++      return service.convertFromChars(
++        text.chars,
++        pageWidth: text.pageWidth,
++        fallbackTitle: fallbackTitle,
++      );
++    } catch (_) {
++      // Si algo raro pasa al interpretar, se prueba con el camino anterior.
++    }
++  }
++  return service.convertAsync(bytes, fallbackTitle: fallbackTitle);
++}
++
++/// Convierte un PDF a ChordPro (una conversión por canción detectada).
++Future<List<PdfConversion>> importPdfAll(Uint8List bytes, {String? fallbackTitle}) async {
++  const service = PdfToChordProService();
++  final text = await extractCharsWithPdfium(bytes);
++  if (text != null) {
++    try {
++      return service.convertAllFromChars(
++        text.chars,
++        pageWidth: text.pageWidth,
++        fallbackTitle: fallbackTitle,
++      );
++    } catch (_) {}
++  }
++  return service.convertAllAsync(bytes, fallbackTitle: fallbackTitle);
++}
+diff --git a/lib/services/pdf_chordpro/pdf_line_processor.dart b/lib/services/pdf_chordpro/pdf_line_processor.dart
+index 5b085c6..d5d904c 100644
+--- a/lib/services/pdf_chordpro/pdf_line_processor.dart
++++ b/lib/services/pdf_chordpro/pdf_line_processor.dart
+@@ -92,14 +92,23 @@ double? detectColumnSplit(List<PdfWord> words, double pageWidth) {
+ 
+ /// Agrupa las palabras en líneas: página -> columna (la izquierda entera y
+ /// luego la derecha) -> fila. Dentro de cada línea, de izquierda a derecha.
+-List<PdfLine> groupLines(List<PdfWord> words, double splitX) {
++///
++/// [tolerance] es la fracción de la altura mediana de las palabras que puede
++/// separar dos palabras de la misma fila. Si el PDF da alturas infladas, con la
++/// tolerancia por defecto la fila de acordes y la de letra se funden: bajarla
++/// las separa.
++List<PdfLine> groupLines(
++  List<PdfWord> words,
++  double splitX, {
++  double tolerance = lineGroupTolerance,
++}) {
+   final lines = <PdfLine>[];
+   final pages = words.map((w) => w.page).toSet().toList()..sort();
+   for (final page in pages) {
+     final pageWords = words.where((w) => w.page == page);
+     for (final leftColumn in const [true, false]) {
+       final column = pageWords.where((w) => (w.left < splitX) == leftColumn);
+-      lines.addAll(_groupColumn(column, page));
++      lines.addAll(_groupColumn(column, page, tolerance));
+     }
+   }
+   // IMPORTANTE: NO reordenar `lines` por Y aquí. El orden es página -> columna
+@@ -109,10 +118,10 @@ List<PdfLine> groupLines(List<PdfWord> words, double splitX) {
+   return lines;
+ }
+ 
+-List<PdfLine> _groupColumn(Iterable<PdfWord> words, int page) {
++List<PdfLine> _groupColumn(Iterable<PdfWord> words, int page, double factor) {
+   final column = words.toList();
+   if (column.isEmpty) return const [];
+-  final tolerance = _medianHeight(column) * lineGroupTolerance;
++  final tolerance = _medianHeight(column) * factor;
+   final sorted = [...column]..sort((a, b) {
+       final t = _centerY(a).compareTo(_centerY(b));
+       return t != 0 ? t : a.left.compareTo(b.left);
+diff --git a/lib/services/pdf_chordpro/pdf_to_chordpro_service.dart b/lib/services/pdf_chordpro/pdf_to_chordpro_service.dart
+index 9e4ef46..412cb1a 100644
+--- a/lib/services/pdf_chordpro/pdf_to_chordpro_service.dart
++++ b/lib/services/pdf_chordpro/pdf_to_chordpro_service.dart
+@@ -19,10 +19,12 @@ import 'package:syncfusion_flutter_pdf/pdf.dart';
+ 
+ import '../../data/chord_parser.dart';
+ import '../../data/chordpro.dart';
++import 'char_boxes.dart';
+ import 'chord_mapper.dart';
+ import 'layout_text_lines.dart';
+ import 'line_classifier.dart';
+-import 'pdf_line_processor.dart' show detectColumnSplit, flattenWords, groupLines;
++import 'pdf_line_processor.dart'
++    show detectColumnSplit, flattenWords, groupLines, lineGroupTolerance;
+ import 'pdf_models.dart';
+ 
+ /// Argumentos para el isolate de conversión (top-level porque Dart no
+@@ -70,22 +72,32 @@ class PdfToChordProService {
+   /// ningún título en el documento.
+   PdfConversion convert(Uint8List bytes, {String? fallbackTitle}) {
+     final doc = PdfDocument(inputBytes: bytes);
+-    List<PdfLine> lines;
++    late final ({List<PdfLine> lines, double tolerance}) extracted;
+     double pageWidth = 595;
+     try {
+       pageWidth = doc.pages.count > 0 ? doc.pages[0].size.width : 595;
+-      lines = _extractLines(doc, pageWidth);
++      extracted = _extractLines(doc, pageWidth);
+     } finally {
+       doc.dispose();
+     }
+-    return buildFromLines(lines, fallbackTitle: fallbackTitle, pageWidth: pageWidth);
++    return buildFromLines(
++      extracted.lines,
++      fallbackTitle: fallbackTitle,
++      pageWidth: pageWidth,
++      tolerance: extracted.tolerance,
++    );
+   }
+ 
+   /// Convierte líneas ya extraídas (separado del PDF para poder probarlo).
++  ///
++  /// [tolerance] es la usada al agrupar las palabras en filas (ver
++  /// [linesFromWordsReliable]): hay que repetirla aquí porque las líneas se
++  /// reagrupan, y con otra tolerancia volverían a fundirse acordes y letra.
+   PdfConversion buildFromLines(
+     List<PdfLine> lines, {
+     String? fallbackTitle,
+     double pageWidth = 595,
++    double tolerance = lineGroupTolerance,
+   }) {
+     final warnings = <ImportWarning>[];
+     bool hadExplicitHeader = false;
+@@ -124,7 +136,7 @@ class PdfToChordProService {
+ 
+     // Agrupar en líneas (ya separadas por columna si hay split)
+     final working =
+-        unpositioned ? lines : groupLines(allWords, splitX ?? pageWidth);
++        unpositioned ? lines : groupLines(allWords, splitX ?? pageWidth, tolerance: tolerance);
+ 
+     // groupLines ya devuelve el orden de lectura: página -> columna (la
+     // izquierda entera y luego la derecha) -> de arriba abajo. Ordenar otra vez
+@@ -277,10 +289,18 @@ class PdfToChordProService {
+   bool _isBelow(PdfLine below, PdfLine above) {
+     if (below.page != above.page) return false;
+     final gap = _holeBetween(below, above);
+-    if (gap < -above.height * 0.5) return false;
+-    return gap <= _tolerance(above);
++    if (gap >= -above.height * 0.5 && gap <= _tolerance(above)) return true;
++
++    // Respaldo por centros: si las cajas de las palabras vienen infladas (se
++    // solapan entre filas) los bordes no sirven, pero la distancia entre los
++    // centros de las filas sigue siendo la de un salto de línea normal.
++    final dy = _centerY(below) - _centerY(above);
++    final font = math.max(above.fontSize, 8.0);
++    return dy >= font * 0.6 && dy <= font * 3.0;
+   }
+ 
++  double _centerY(PdfLine l) => (l.top + l.bottom) / 2;
++
+   /// Hueco vertical entre el final de [above] y el principio de [below].
+   double _holeBetween(PdfLine below, PdfLine above) => below.top - above.bottom;
+ 
+@@ -349,18 +369,41 @@ class PdfToChordProService {
+ 
+   /// Extrae las líneas del PDF.
+   ///
+-  /// Se intenta primero la vía geométrica (palabras con coordenadas). Si
+-  /// Syncfusion devuelve acordes y letra fundidos en la misma fila —pasa en
+-  /// "Serviremos al Señor"—, la geometría no sirve y se rehace con el texto en
+-  /// modo layout, que sí respeta las filas que ve una persona.
+-  List<PdfLine> _extractLines(PdfDocument doc, double pageWidth) {
+-    final geometric = _linesFromGeometry(doc, pageWidth);
+-    if (_geometryIsReliable(geometric)) return geometric;
++  /// Se intenta primero la vía geométrica (palabras con coordenadas reales: la
++  /// única que da la posición EXACTA de cada acorde sobre la letra). Si las
++  /// filas salen fundidas (acordes y letra en la misma línea), se vuelve a
++  /// agrupar con tolerancias más estrictas antes de rendirse. Solo si ninguna
++  /// funciona se usa el texto en modo layout, que es aproximado.
++  ({List<PdfLine> lines, double tolerance}) _extractLines(PdfDocument doc, double pageWidth) {
++    final words = _geometryWords(doc);
++    final geometric = linesFromWordsReliable(words, pageWidth);
++    if (geometric != null) return geometric;
+     final laid = _linesFromLayout(doc);
+-    return laid.isNotEmpty ? laid : geometric;
++    if (laid.isNotEmpty) return (lines: laid, tolerance: lineGroupTolerance);
++    return (
++      lines: _linesFromWords(words, pageWidth, lineGroupTolerance),
++      tolerance: lineGroupTolerance,
++    );
+   }
+ 
+-
++  /// Tolerancias de agrupación a probar, de la habitual a la más estricta
++  /// (fracción de la altura mediana de las palabras).
++  static const List<double> _toleranceSteps = [lineGroupTolerance, 0.35, 0.25, 0.15, 0.08];
++
++  /// Agrupa [words] en líneas probando tolerancias cada vez más estrictas hasta
++  /// que el resultado sea fiable. Devuelve las líneas y la tolerancia que
++  /// funcionó, o null si ninguna lo es.
++  @visibleForTesting
++  ({List<PdfLine> lines, double tolerance})? linesFromWordsReliable(
++    List<PdfWord> words,
++    double pageWidth,
++  ) {
++    for (final t in _toleranceSteps) {
++      final lines = _linesFromWords(words, pageWidth, t);
++      if (_geometryIsReliable(lines)) return (lines: lines, tolerance: t);
++    }
++    return null;
++  }
+ 
+   /// Fracción de líneas que mezclan acordes con letra a partir de la cual la
+   /// extracción por coordenadas no es fiable.
+@@ -404,48 +447,53 @@ class PdfToChordProService {
+ 
+ 
+ 
+-  /// Extrae palabras del PDF con posición, filtra números de página y marcas.
+-  List<PdfLine> _linesFromGeometry(PdfDocument doc, double pageWidth) {
+-    final textLines = PdfTextExtractor(doc).extractTextLines();
+-    final allWords = <({PdfWord word, int page})>[];
+-    for (final l in textLines) {
++  /// Palabras del PDF con su posición real (y la X de cada letra).
++  List<PdfWord> _geometryWords(PdfDocument doc) {
++    final out = <PdfWord>[];
++    for (final l in PdfTextExtractor(doc).extractTextLines()) {
+       for (final w in l.wordCollection) {
+         var wt = w.text;
+         if (wt.isEmpty) {
+           wt = w.glyphs.map((g) => g.text).join();
+         }
+         if (wt.trim().isEmpty) continue;
+-        allWords.add((
+-          word: PdfWord(
+-            text: wt,
+-            left: w.bounds.left,
+-            top: w.bounds.top,
+-            right: w.bounds.right,
+-            bottom: w.bounds.bottom,
+-            fontSize: l.fontSize,
+-            glyphLefts: w.glyphs.map((g) => g.bounds.left).toList(),
+-            page: l.pageIndex,
+-          ),
++
++        var left = w.bounds.left, right = w.bounds.right;
++        var top = w.bounds.top, bottom = w.bounds.bottom;
++        // Bounds corruptos (ancho/alto negativo): se rehacen con los de las letras.
++        if ((right < left || bottom <= top) && w.glyphs.isNotEmpty) {
++          left = w.glyphs.map((g) => g.bounds.left).reduce(math.min);
++          right = w.glyphs.map((g) => g.bounds.right).reduce(math.max);
++          top = w.glyphs.map((g) => g.bounds.top).reduce(math.min);
++          bottom = w.glyphs.map((g) => g.bounds.bottom).reduce(math.max);
++        }
++        out.add(PdfWord(
++          text: wt,
++          left: left,
++          top: top,
++          right: right,
++          bottom: bottom,
++          fontSize: l.fontSize,
++          glyphLefts: w.glyphs.map((g) => g.bounds.left).toList(),
+           page: l.pageIndex,
+         ));
+       }
+     }
++    return out;
++  }
+ 
++  /// Agrupa palabras con coordenadas en líneas (columnas -> filas), con la
++  /// [tolerance] dada, y filtra números de página y marcas.
++  List<PdfLine> _linesFromWords(List<PdfWord> input, double pageWidth, double tolerance) {
+     // Orden bruto: de arriba abajo, luego izquierda a derecha.
+-    allWords.sort((a, b) {
+-      final t = a.word.top.compareTo(b.word.top);
+-      if (t != 0) return t;
+-      return a.word.left.compareTo(b.word.left);
+-    });
++    final words = [...input]..sort((a, b) {
++        final t = a.top.compareTo(b.top);
++        return t != 0 ? t : a.left.compareTo(b.left);
++      });
+ 
+-    // Aplanar palabras
+-    final words = allWords.map((w) => w.word).toList();
+-
+-    // Detectar corte de columnas
++    // Detectar corte de columnas y agrupar en líneas.
+     final splitX = detectColumnSplit(words, pageWidth);
+-
+-    // Agrupar en líneas (ya separadas por columna si hay split)
+-    final lines = groupLines(words, splitX ?? pageWidth);
++    final lines = groupLines(words, splitX ?? pageWidth, tolerance: tolerance);
+ 
+     // Filtrar ruido
+     final result = <PdfLine>[];
+@@ -479,6 +527,52 @@ class PdfToChordProService {
+   Future<List<PdfConversion>> convertAllAsync(Uint8List bytes, {String? fallbackTitle}) async =>
+       compute(_convertAllPdfIsolate, _PdfConvertArgs(bytes, fallbackTitle));
+ 
++  // ============================================================================
++  // Desde cajas de caracteres (PDFium).
++  // ============================================================================
++
++  /// Palabras -> líneas, probando tolerancias hasta que sean fiables. Si
++  /// ninguna lo es, se usa la habitual (mejor eso que nada).
++  ({List<PdfLine> lines, double tolerance}) _linesFromCharWords(List<PdfWord> words, double pageWidth) {
++    final reliable = linesFromWordsReliable(words, pageWidth);
++    if (reliable != null) return reliable;
++    return (
++      lines: _linesFromWords(words, pageWidth, lineGroupTolerance),
++      tolerance: lineGroupTolerance,
++    );
++  }
++
++  /// Convierte un PDF a partir de la caja de cada carácter (ver [PdfCharBox]),
++  /// que da la posición REAL de cada acorde sobre la letra.
++  PdfConversion convertFromChars(
++    List<PdfCharBox> chars, {
++    required double pageWidth,
++    String? fallbackTitle,
++  }) {
++    final r = _linesFromCharWords(wordsFromChars(chars), pageWidth);
++    return buildFromLines(
++      r.lines,
++      fallbackTitle: fallbackTitle,
++      pageWidth: pageWidth,
++      tolerance: r.tolerance,
++    );
++  }
++
++  /// Como [convertFromChars] pero una conversión por canción detectada.
++  List<PdfConversion> convertAllFromChars(
++    List<PdfCharBox> chars, {
++    required double pageWidth,
++    String? fallbackTitle,
++  }) {
++    final r = _linesFromCharWords(wordsFromChars(chars), pageWidth);
++    return buildAllFromLines(
++      r.lines,
++      fallbackTitle: fallbackTitle,
++      pageWidth: pageWidth,
++      tolerance: r.tolerance,
++    );
++  }
++
+   // ============================================================================
+   // Varias canciones en un mismo PDF.
+   // ============================================================================
+@@ -486,15 +580,20 @@ class PdfToChordProService {
+   /// Como [convert] pero devuelve una conversión por canción detectada en el PDF.
+   List<PdfConversion> convertAll(Uint8List bytes, {String? fallbackTitle}) {
+     final doc = PdfDocument(inputBytes: bytes);
+-    List<PdfLine> lines;
++    late final ({List<PdfLine> lines, double tolerance}) extracted;
+     double pageWidth = 595;
+     try {
+       pageWidth = doc.pages.count > 0 ? doc.pages[0].size.width : 595;
+-      lines = _extractLines(doc, pageWidth);
++      extracted = _extractLines(doc, pageWidth);
+     } finally {
+       doc.dispose();
+     }
+-    return buildAllFromLines(lines, fallbackTitle: fallbackTitle, pageWidth: pageWidth);
++    return buildAllFromLines(
++      extracted.lines,
++      fallbackTitle: fallbackTitle,
++      pageWidth: pageWidth,
++      tolerance: extracted.tolerance,
++    );
+   }
+ 
+   /// Como [buildFromLines] pero devuelve una conversión por canción detectada.
+@@ -502,14 +601,15 @@ class PdfToChordProService {
+     List<PdfLine> lines, {
+     String? fallbackTitle,
+     double pageWidth = 595,
++    double tolerance = lineGroupTolerance,
+   }) {
+     if (lines.isEmpty) {
+-      return [buildFromLines(lines, fallbackTitle: fallbackTitle, pageWidth: pageWidth)];
++      return [buildFromLines(lines, fallbackTitle: fallbackTitle, pageWidth: pageWidth, tolerance: tolerance)];
+     }
+ 
+     final boundaries = _detectSongBoundaries(lines);
+     if (boundaries.length <= 1) {
+-      return [buildFromLines(lines, fallbackTitle: fallbackTitle, pageWidth: pageWidth)];
++      return [buildFromLines(lines, fallbackTitle: fallbackTitle, pageWidth: pageWidth, tolerance: tolerance)];
+     }
+ 
+     final conversions = <PdfConversion>[];
+@@ -522,6 +622,7 @@ class PdfToChordProService {
+         group,
+         fallbackTitle: i == 0 ? fallbackTitle : null,
+         pageWidth: pageWidth,
++        tolerance: tolerance,
+       );
+       conversions.add(conv);
+     }
+diff --git a/lib/services/pdf_chordpro/pdfium_extractor.dart b/lib/services/pdf_chordpro/pdfium_extractor.dart
+new file mode 100644
+index 0000000..45ae639
+--- /dev/null
++++ b/lib/services/pdf_chordpro/pdfium_extractor.dart
+@@ -0,0 +1,66 @@
++// Lee un PDF con PDFium (vía pdfrx) y devuelve la caja REAL de cada carácter.
++//
++// Es la única parte que depende del paquete `pdfrx`; todo lo demás
++// (char_boxes.dart, el servicio) es Dart puro y se prueba aparte.
++import 'dart:math' as math;
++import 'dart:typed_data';
++
++import 'package:pdfrx/pdfrx.dart';
++
++import 'char_boxes.dart';
++
++/// Texto de un PDF como cajas de caracteres + ancho de la primera página.
++class PdfiumText {
++  final List<PdfCharBox> chars;
++  final double pageWidth;
++  const PdfiumText(this.chars, this.pageWidth);
++}
++
++/// Extrae las cajas de caracteres de [bytes].
++///
++/// Devuelve null si no se puede (PDF dañado, escaneado sin texto, páginas
++/// rotadas o plataforma sin soporte de PDFium): el llamador debe usar entonces
++/// el extractor de respaldo.
++Future<PdfiumText?> extractCharsWithPdfium(Uint8List bytes) async {
++  PdfDocument? doc;
++  try {
++    doc = await PdfDocument.openData(bytes);
++    final chars = <PdfCharBox>[];
++    var pageWidth = 595.0;
++
++    for (final page in doc.pages) {
++      // Las cajas vienen en coordenadas de la página sin girar: con páginas
++      // giradas las X/Y no coincidirían con lo que se ve.
++      if (page.rotation.index != 0) return null;
++      if (page.pageNumber == 1) pageWidth = page.width;
++
++      final text = await page.loadText();
++      final full = text.fullText;
++      final rects = text.charRects;
++      final n = math.min(full.length, rects.length);
++      for (var i = 0; i < n; i++) {
++        final r = rects[i];
++        chars.add(PdfCharBox.fromPdfRect(
++          ch: full[i],
++          left: r.left,
++          top: r.top,
++          right: r.right,
++          bottom: r.bottom,
++          pageHeight: page.height,
++          page: page.pageNumber - 1,
++        ));
++      }
++    }
++
++    // Un PDF escaneado (imagen) casi no trae texto.
++    final visible = chars.where((c) => c.ch.trim().isNotEmpty).length;
++    if (visible < 20) return null;
++    return PdfiumText(chars, pageWidth);
++  } catch (_) {
++    return null;
++  } finally {
++    try {
++      await doc?.dispose();
++    } catch (_) {}
++  }
++}
+diff --git a/pubspec.yaml b/pubspec.yaml
+index 578dce7..aa92029 100644
+--- a/pubspec.yaml
++++ b/pubspec.yaml
+@@ -19,7 +19,6 @@ dependencies:
+   flutter_file_dialog: ^3.3.3
+   flutter_soloud: ^5.2.1
+   receive_sharing_intent: ^1.9.0
+-  http: ^1.2.2
+ 
+ dev_dependencies:
+   flutter_test:
+diff --git a/test/pdf_chordpro/char_boxes_test.dart b/test/pdf_chordpro/char_boxes_test.dart
+new file mode 100644
+index 0000000..0f59325
+--- /dev/null
++++ b/test/pdf_chordpro/char_boxes_test.dart
+@@ -0,0 +1,87 @@
++// wordsFromChars: de cajas de caracteres (PDFium) a palabras con X real.
++import 'package:appchords/services/pdf_chordpro/char_boxes.dart';
++import 'package:flutter_test/flutter_test.dart';
++
++/// Escribe [text] a 6 pt por letra desde [x], en la fila [y] (alto 9).
++List<PdfCharBox> _run(String text, double x, double y, {int page = 0}) => [
++      for (var i = 0; i < text.length; i++)
++        PdfCharBox(ch: text[i], left: x + 6.0 * i, right: x + 6.0 * i + 5, top: y, bottom: y + 9, page: page),
++    ];
++
++void main() {
++  test('separa palabras por el espacio y conserva la X de cada letra', () {
++    // "Hola mundo" con un espacio real (hueco de 6 pt entre palabras)
++    final chars = [..._run('Hola', 100, 50), ..._run('mundo', 130, 50)];
++    final w = wordsFromChars(chars);
++    expect(w.map((x) => x.text).toList(), ['Hola', 'mundo']);
++    expect(w[0].glyphLefts, [100.0, 106.0, 112.0, 118.0]);
++    expect(w[1].left, 130.0);
++  });
++
++  test('un espacio emitido por el PDF corta la palabra aunque el hueco sea pequeño', () {
++    final chars = [
++      ..._run('ab', 100, 50),
++      const PdfCharBox(ch: ' ', left: 112, right: 114, top: 50, bottom: 50.02),
++      ..._run('cd', 114, 50), // hueco de solo 1 pt tras la 'b' (que termina en 113)
++    ];
++    expect(wordsFromChars(chars).map((x) => x.text).toList(), ['ab', 'cd']);
++  });
++
++  test('letras de una misma palabra con huecos pequeños NO se parten', () {
++    // hueco interletra de 2 pt (cajas ajustadas al glifo)
++    final chars = [
++      for (var i = 0; i < 6; i++)
++        PdfCharBox(ch: 'humill'[i], left: 100 + 7.0 * i, right: 105 + 7.0 * i, top: 50, bottom: 59),
++    ];
++    expect(wordsFromChars(chars).map((x) => x.text).toList(), ['humill']);
++  });
++
++  test('acordes y letra quedan en filas distintas, con su X real', () {
++    final chars = [
++      ..._run('D', 148, 30),
++      ..._run('Nos', 100, 44),
++      ..._run('humillamos', 124, 44),
++    ];
++    final w = wordsFromChars(chars);
++    expect(w.length, 3);
++    final d = w.firstWhere((x) => x.text == 'D');
++    final nos = w.firstWhere((x) => x.text == 'Nos');
++    expect(d.top < nos.top, isTrue);
++    expect(d.left, 148.0);
++  });
++
++  test('un acento alto no cambia de fila a su palabra', () {
++    final chars = [
++      ..._run('SE', 100, 50),
++      // la Ñ trae una caja mas alta que sube 3 pt
++      const PdfCharBox(ch: 'Ñ', left: 112, right: 117, top: 47, bottom: 59),
++      ..._run('OR', 118, 50),
++    ];
++    expect(wordsFromChars(chars).map((x) => x.text).toList(), ['SEÑOR']);
++  });
++
++  test('ignora saltos de línea, espacios y cajas vacías', () {
++    final chars = [
++      ..._run('Hola', 100, 50),
++      const PdfCharBox(ch: '\r', left: 0, right: 0, top: 0, bottom: 0),
++      const PdfCharBox(ch: '\n', left: 0, right: 0, top: 0, bottom: 0),
++      const PdfCharBox(ch: 'x', left: 200, right: 200, top: 50, bottom: 59), // ancho 0
++    ];
++    expect(wordsFromChars(chars).map((x) => x.text).toList(), ['Hola']);
++  });
++
++  test('cada página se procesa por separado', () {
++    final chars = [..._run('uno', 100, 50, page: 0), ..._run('dos', 100, 50, page: 1)];
++    final w = wordsFromChars(chars);
++    expect(w.map((x) => '${x.page}:${x.text}').toList(), ['0:uno', '1:dos']);
++  });
++
++  test('fromPdfRect pasa de coordenadas PDF (origen abajo) a las del importador', () {
++    final c = PdfCharBox.fromPdfRect(
++      ch: 'D', left: 10, top: 700, right: 18, bottom: 691, pageHeight: 792,
++    );
++    expect(c.top, 92.0);
++    expect(c.bottom, 101.0);
++    expect(c.height, 9.0);
++  });
++}
+diff --git a/test/pdf_chordpro/fixtures/serviremos_al_senor.chars.json b/test/pdf_chordpro/fixtures/serviremos_al_senor.chars.json
+new file mode 100644
+index 0000000..732bfa1
+--- /dev/null
++++ b/test/pdf_chordpro/fixtures/serviremos_al_senor.chars.json
+@@ -0,0 +1 @@
++{"pages":[{"page":0,"width":612.0,"height":792.0},{"page":1,"width":612.0,"height":792.0}],"chars":[{"p":0,"c":"S","l":180.04,"t":44.66,"r":191.63,"b":59.4},{"p":0,"c":"E","l":193.98,"t":44.9,"r":204.81,"b":59.16},{"p":0,"c":"R","l":207.18,"t":44.9,"r":220.0,"b":59.16},{"p":0,"c":"V","l":220.36,"t":44.9,"r":233.62,"b":59.16},{"p":0,"c":"I","l":234.91,"t":44.9,"r":237.8,"b":59.16},{"p":0,"c":"R","l":240.52,"t":44.9,"r":253.35,"b":59.16},{"p":0,"c":"E","l":255.16,"t":44.9,"r":266.0,"b":59.16},{"p":0,"c":"M","l":268.32,"t":44.9,"r":282.09,"b":59.16},{"p":0,"c":"O","l":284.33,"t":44.66,"r":298.17,"b":59.38},{"p":0,"c":"S","l":300.04,"t":44.66,"r":311.63,"b":59.4},{"p":0,"c":" ","l":312.53,"t":59.14,"r":318.06,"b":59.16},{"p":0,"c":"A","l":318.04,"t":44.9,"r":332.34,"b":59.16},{"p":0,"c":"L","l":333.97,"t":45.02,"r":344.01,"b":59.16},{"p":0,"c":" ","l":344.68,"t":59.14,"r":350.22,"b":59.16},{"p":0,"c":"S","l":351.17,"t":44.66,"r":362.76,"b":59.4},{"p":0,"c":"E","l":365.1,"t":44.9,"r":375.94,"b":59.16},{"p":0,"c":"Ñ","l":378.32,"t":41.63,"r":389.64,"b":59.16},{"p":0,"c":"O","l":392.1,"t":44.66,"r":405.95,"b":59.38},{"p":0,"c":"R","l":408.29,"t":44.9,"r":421.12,"b":59.16},{"p":0,"c":"\r","l":407.56,"t":59.16,"r":407.56,"b":59.16},{"p":0,"c":"\n","l":407.56,"t":59.16,"r":407.56,"b":59.16},{"p":0,"c":"I","l":32.84,"t":102.17,"r":33.98,"b":110.76},{"p":0,"c":"N","l":35.99,"t":102.17,"r":42.76,"b":110.76},{"p":0,"c":"T","l":44.0,"t":102.17,"r":50.81,"b":110.76},{"p":0,"c":"R","l":52.11,"t":102.17,"r":59.67,"b":110.76},{"p":0,"c":"O","l":60.38,"t":102.01,"r":68.6,"b":110.89},{"p":0,"c":":","l":70.24,"t":104.53,"r":71.44,"b":110.76},{"p":0,"c":" ","l":69.44,"t":110.76,"r":69.44,"b":110.76},{"p":0,"c":"D","l":79.29,"t":102.17,"r":87.3,"b":110.76},{"p":0,"c":" ","l":87.4,"t":110.75,"r":90.74,"b":110.76},{"p":0,"c":"|","l":95.22,"t":102.02,"r":96.14,"b":113.27},{"p":0,"c":" ","l":97.24,"t":110.75,"r":100.58,"b":110.76},{"p":0,"c":"G","l":104.88,"t":102.02,"r":112.91,"b":110.89},{"p":0,"c":" ","l":113.08,"t":110.75,"r":116.42,"b":110.76},{"p":0,"c":"/","l":119.2,"t":102.02,"r":124.73,"b":110.89},{"p":0,"c":"/","l":122.56,"t":102.02,"r":128.09,"b":110.89},{"p":0,"c":"\r","l":123.44,"t":110.76,"r":123.44,"b":110.76},{"p":0,"c":"\n","l":123.44,"t":110.76,"r":123.44,"b":110.76},{"p":0,"c":" ","l":138.04,"t":152.03,"r":141.38,"b":152.04},{"p":0,"c":"D","l":208.89,"t":143.45,"r":216.9,"b":152.04},{"p":0,"c":" ","l":217.0,"t":152.03,"r":220.34,"b":152.04},{"p":0,"c":"G","l":351.36,"t":143.3,"r":359.39,"b":152.17},{"p":0,"c":" ","l":359.56,"t":152.03,"r":362.9,"b":152.04},{"p":0,"c":"\r","l":359.84,"t":152.04,"r":359.84,"b":152.04},{"p":0,"c":"\n","l":359.84,"t":152.04,"r":359.84,"b":152.04},{"p":0,"c":"V","l":31.78,"t":159.59,"r":40.89,"b":169.56},{"p":0,"c":"E","l":42.18,"t":159.59,"r":49.61,"b":169.56},{"p":0,"c":"R","l":51.54,"t":159.59,"r":60.31,"b":169.56},{"p":0,"c":"S","l":61.15,"t":159.43,"r":69.08,"b":169.71},{"p":0,"c":"O","l":70.55,"t":159.41,"r":80.09,"b":169.71},{"p":0,"c":" ","l":80.68,"t":169.55,"r":84.55,"b":169.56},{"p":0,"c":"1","l":86.03,"t":159.55,"r":89.7,"b":169.56},{"p":0,"c":" ","l":85.07,"t":169.56,"r":85.07,"b":169.56},{"p":0,"c":"N","l":139.26,"t":158.05,"r":148.33,"b":169.56},{"p":0,"c":"o","l":150.09,"t":161.04,"r":157.91,"b":169.74},{"p":0,"c":"s","l":158.94,"t":161.04,"r":165.86,"b":169.74},{"p":0,"c":" ","l":166.6,"t":169.54,"r":171.07,"b":169.56},{"p":0,"c":"h","l":172.22,"t":158.05,"r":179.01,"b":169.56},{"p":0,"c":"u","l":181.07,"t":161.21,"r":187.82,"b":169.74},{"p":0,"c":"m","l":189.98,"t":161.04,"r":201.29,"b":169.56},{"p":0,"c":"i","l":203.42,"t":158.05,"r":204.83,"b":169.56},{"p":0,"c":"l","l":206.75,"t":158.05,"r":208.17,"b":169.56},{"p":0,"c":"l","l":210.36,"t":158.05,"r":211.78,"b":169.56},{"p":0,"c":"a","l":213.52,"t":161.04,"r":221.21,"b":169.74},{"p":0,"c":"m","l":222.88,"t":161.04,"r":234.19,"b":169.56},{"p":0,"c":"o","l":235.79,"t":161.04,"r":243.6,"b":169.74},{"p":0,"c":"s","l":244.4,"t":161.04,"r":251.31,"b":169.74},{"p":0,"c":" ","l":252.06,"t":169.54,"r":256.53,"b":169.56},{"p":0,"c":"d","l":257.15,"t":158.05,"r":264.38,"b":169.74},{"p":0,"c":"e","l":266.07,"t":161.04,"r":273.76,"b":169.74},{"p":0,"c":"l","l":275.39,"t":158.05,"r":276.8,"b":169.56},{"p":0,"c":"a","l":278.54,"t":161.04,"r":286.23,"b":169.74},{"p":0,"c":"n","l":287.9,"t":161.04,"r":294.67,"b":169.56},{"p":0,"c":"t","l":295.77,"t":158.3,"r":299.84,"b":169.66},{"p":0,"c":"e","l":300.63,"t":161.04,"r":308.32,"b":169.74},{"p":0,"c":" ","l":308.91,"t":169.54,"r":313.38,"b":169.56},{"p":0,"c":"d","l":314.02,"t":158.05,"r":321.25,"b":169.74},{"p":0,"c":"e","l":322.94,"t":161.04,"r":330.63,"b":169.74},{"p":0,"c":" ","l":331.23,"t":169.54,"r":335.7,"b":169.56},{"p":0,"c":"n","l":336.84,"t":161.04,"r":343.61,"b":169.56},{"p":0,"c":"u","l":345.69,"t":161.21,"r":352.44,"b":169.74},{"p":0,"c":"e","l":354.13,"t":161.04,"r":361.82,"b":169.74},{"p":0,"c":"s","l":362.68,"t":161.04,"r":369.59,"b":169.74},{"p":0,"c":"t","l":370.62,"t":158.3,"r":374.69,"b":169.66},{"p":0,"c":"r","l":375.93,"t":161.04,"r":380.47,"b":169.56},{"p":0,"c":"o","l":380.45,"t":161.04,"r":388.27,"b":169.74},{"p":0,"c":" ","l":388.8,"t":169.54,"r":393.27,"b":169.56},{"p":0,"c":"D","l":394.6,"t":158.05,"r":404.11,"b":169.56},{"p":0,"c":"i","l":405.93,"t":158.05,"r":407.35,"b":169.56},{"p":0,"c":"o","l":409.01,"t":161.04,"r":416.82,"b":169.74},{"p":0,"c":"s","l":417.86,"t":161.04,"r":424.77,"b":169.74},{"p":0,"c":" ","l":167.56,"t":184.19,"r":170.9,"b":184.2},{"p":0,"c":"B","l":174.8,"t":175.61,"r":182.14,"b":184.2},{"p":0,"c":"m","l":182.6,"t":177.84,"r":191.96,"b":184.2},{"p":0,"c":" ","l":192.28,"t":184.19,"r":195.62,"b":184.2},{"p":0,"c":"A","l":248.93,"t":175.61,"r":256.56,"b":184.2},{"p":0,"c":" ","l":257.08,"t":184.19,"r":260.42,"b":184.2},{"p":0,"c":"G","l":365.04,"t":175.46,"r":373.07,"b":184.33},{"p":0,"c":"\r","l":364.66,"t":184.2,"r":364.66,"b":184.2},{"p":0,"c":"\n","l":364.66,"t":184.2,"r":364.66,"b":184.2},{"p":0,"c":"S","l":138.76,"t":190.01,"r":147.93,"b":201.9},{"p":0,"c":"a","l":149.42,"t":193.2,"r":157.1,"b":201.9},{"p":0,"c":"c","l":158.35,"t":193.2,"r":165.62,"b":201.9},{"p":0,"c":"r","l":166.93,"t":193.2,"r":171.47,"b":201.72},{"p":0,"c":"i","l":172.23,"t":190.21,"r":173.65,"b":201.72},{"p":0,"c":"f","l":174.67,"t":190.01,"r":179.56,"b":201.72},{"p":0,"c":"i","l":180.15,"t":190.21,"r":181.56,"b":201.72},{"p":0,"c":"c","l":183.31,"t":193.2,"r":190.58,"b":201.9},{"p":0,"c":"i","l":191.66,"t":190.21,"r":193.08,"b":201.72},{"p":0,"c":"o","l":194.73,"t":193.2,"r":202.54,"b":201.9},{"p":0,"c":" ","l":203.08,"t":201.7,"r":207.55,"b":201.72},{"p":0,"c":"a","l":208.22,"t":193.2,"r":215.91,"b":201.9},{"p":0,"c":"g","l":217.04,"t":193.2,"r":224.39,"b":205.08},{"p":0,"c":"r","l":226.46,"t":193.2,"r":231.0,"b":201.72},{"p":0,"c":"a","l":231.28,"t":193.2,"r":238.96,"b":201.9},{"p":0,"c":"d","l":240.13,"t":190.21,"r":247.37,"b":201.9},{"p":0,"c":"a","l":249.05,"t":193.2,"r":256.74,"b":201.9},{"p":0,"c":"b","l":258.4,"t":190.21,"r":265.64,"b":201.9},{"p":0,"c":"l","l":267.27,"t":190.21,"r":268.69,"b":201.72},{"p":0,"c":"e","l":270.43,"t":193.2,"r":278.12,"b":201.9},{"p":0,"c":" ","l":278.72,"t":201.7,"r":283.19,"b":201.72},{"p":0,"c":"q","l":283.85,"t":193.2,"r":291.07,"b":204.9},{"p":0,"c":"u","l":293.2,"t":193.37,"r":299.95,"b":201.9},{"p":0,"c":"e","l":301.65,"t":193.2,"r":309.34,"b":201.9},{"p":0,"c":"r","l":310.99,"t":193.2,"r":315.52,"b":201.72},{"p":0,"c":"e","l":315.82,"t":193.2,"r":323.51,"b":201.9},{"p":0,"c":"m","l":325.17,"t":193.2,"r":336.48,"b":201.72},{"p":0,"c":"o","l":338.08,"t":193.2,"r":345.89,"b":201.9},{"p":0,"c":"s","l":346.69,"t":193.2,"r":353.61,"b":201.9},{"p":0,"c":" ","l":354.35,"t":201.7,"r":358.82,"b":201.72},{"p":0,"c":"s","l":359.17,"t":193.2,"r":366.09,"b":201.9},{"p":0,"c":"e","l":367.43,"t":193.2,"r":375.12,"b":201.9},{"p":0,"c":"r","l":376.77,"t":193.2,"r":381.3,"b":201.72},{"p":0,"c":" ","l":167.56,"t":216.35,"r":170.9,"b":216.36},{"p":0,"c":"D","l":214.89,"t":207.77,"r":222.9,"b":216.36},{"p":0,"c":" ","l":223.0,"t":216.35,"r":226.34,"b":216.36},{"p":0,"c":"G","l":341.04,"t":207.62,"r":349.07,"b":216.49},{"p":0,"c":" ","l":349.0,"t":216.35,"r":352.34,"b":216.36},{"p":0,"c":"\r","l":349.28,"t":216.36,"r":349.28,"b":216.36},{"p":0,"c":"\n","l":349.28,"t":216.36,"r":349.28,"b":216.36},{"p":0,"c":"H","l":139.33,"t":222.37,"r":148.36,"b":233.88},{"p":0,"c":"o","l":150.09,"t":225.36,"r":157.91,"b":234.06},{"p":0,"c":"y","l":158.7,"t":225.53,"r":166.34,"b":237.24},{"p":0,"c":" ","l":166.6,"t":233.86,"r":171.07,"b":233.88},{"p":0,"c":"r","l":172.2,"t":225.36,"r":176.74,"b":233.88},{"p":0,"c":"e","l":177.03,"t":225.36,"r":184.72,"b":234.06},{"p":0,"c":"n","l":186.38,"t":225.36,"r":193.15,"b":233.88},{"p":0,"c":"u","l":195.23,"t":225.53,"r":201.99,"b":234.06},{"p":0,"c":"n","l":204.15,"t":225.36,"r":210.92,"b":233.88},{"p":0,"c":"c","l":212.6,"t":225.36,"r":219.86,"b":234.06},{"p":0,"c":"i","l":221.19,"t":222.37,"r":222.6,"b":233.88},{"p":0,"c":"a","l":224.32,"t":225.36,"r":232.0,"b":234.06},{"p":0,"c":"m","l":233.44,"t":225.36,"r":244.74,"b":233.88},{"p":0,"c":"o","l":246.34,"t":225.36,"r":254.16,"b":234.06},{"p":0,"c":"s","l":255.19,"t":225.36,"r":262.11,"b":234.06},{"p":0,"c":" ","l":262.61,"t":233.86,"r":267.08,"b":233.88},{"p":0,"c":"a","l":267.75,"t":225.36,"r":275.43,"b":234.06},{"p":0,"c":" ","l":276.05,"t":233.86,"r":280.52,"b":233.88},{"p":0,"c":"n","l":281.67,"t":225.36,"r":288.44,"b":233.88},{"p":0,"c":"u","l":290.52,"t":225.53,"r":297.27,"b":234.06},{"p":0,"c":"e","l":298.97,"t":225.36,"r":306.65,"b":234.06},{"p":0,"c":"s","l":307.51,"t":225.36,"r":314.43,"b":234.06},{"p":0,"c":"t","l":315.46,"t":222.62,"r":319.53,"b":233.98},{"p":0,"c":"r","l":320.78,"t":225.36,"r":325.31,"b":233.88},{"p":0,"c":"a","l":325.59,"t":225.36,"r":333.28,"b":234.06},{"p":0,"c":" ","l":333.89,"t":233.86,"r":338.36,"b":233.88},{"p":0,"c":"v","l":338.42,"t":225.53,"r":346.06,"b":233.88},{"p":0,"c":"o","l":346.9,"t":225.36,"r":354.71,"b":234.06},{"p":0,"c":"l","l":356.28,"t":222.37,"r":357.7,"b":233.88},{"p":0,"c":"u","l":359.89,"t":225.53,"r":366.64,"b":234.06},{"p":0,"c":"n","l":368.8,"t":225.36,"r":375.57,"b":233.88},{"p":0,"c":"t","l":376.67,"t":222.62,"r":380.74,"b":233.98},{"p":0,"c":"a","l":381.28,"t":225.36,"r":388.97,"b":234.06},{"p":0,"c":"d","l":390.13,"t":222.37,"r":397.37,"b":234.06},{"p":0,"c":" ","l":167.56,"t":248.51,"r":170.9,"b":248.52},{"p":0,"c":"B","l":178.16,"t":239.93,"r":185.5,"b":248.52},{"p":0,"c":"m","l":185.96,"t":242.16,"r":195.32,"b":248.52},{"p":0,"c":" ","l":195.64,"t":248.51,"r":198.98,"b":248.52},{"p":0,"c":"A","l":308.93,"t":239.93,"r":316.56,"b":248.52},{"p":0,"c":" ","l":317.08,"t":248.51,"r":320.42,"b":248.52},{"p":0,"c":"G","l":391.68,"t":239.78,"r":399.71,"b":248.65},{"p":0,"c":"\r","l":391.3,"t":248.52,"r":391.3,"b":248.52},{"p":0,"c":"\n","l":391.3,"t":248.52,"r":391.3,"b":248.52},{"p":0,"c":"S","l":138.76,"t":254.57,"r":147.93,"b":266.46},{"p":0,"c":"u","l":149.87,"t":257.93,"r":156.62,"b":266.46},{"p":0,"c":" ","l":157.73,"t":266.26,"r":162.2,"b":266.28},{"p":0,"c":"p","l":163.35,"t":257.76,"r":170.58,"b":269.46},{"p":0,"c":"a","l":171.75,"t":257.76,"r":179.44,"b":266.46},{"p":0,"c":"l","l":181.09,"t":254.77,"r":182.5,"b":266.28},{"p":0,"c":"a","l":184.23,"t":257.76,"r":191.92,"b":266.46},{"p":0,"c":"b","l":193.58,"t":254.77,"r":200.82,"b":266.46},{"p":0,"c":"r","l":202.47,"t":257.76,"r":207.0,"b":266.28},{"p":0,"c":"a","l":207.29,"t":257.76,"r":214.97,"b":266.46},{"p":0,"c":" ","l":215.59,"t":266.26,"r":220.06,"b":266.28},{"p":0,"c":"e","l":220.75,"t":257.76,"r":228.44,"b":266.46},{"p":0,"c":"s","l":229.3,"t":257.76,"r":236.21,"b":266.46},{"p":0,"c":" ","l":236.96,"t":266.26,"r":241.43,"b":266.28},{"p":0,"c":"n","l":242.58,"t":257.76,"r":249.35,"b":266.28},{"p":0,"c":"u","l":251.44,"t":257.93,"r":258.19,"b":266.46},{"p":0,"c":"e","l":259.89,"t":257.76,"r":267.57,"b":266.46},{"p":0,"c":"s","l":268.44,"t":257.76,"r":275.35,"b":266.46},{"p":0,"c":"t","l":276.39,"t":255.02,"r":280.46,"b":266.38},{"p":0,"c":"r","l":281.71,"t":257.76,"r":286.24,"b":266.28},{"p":0,"c":"a","l":286.52,"t":257.76,"r":294.21,"b":266.46},{"p":0,"c":" ","l":294.83,"t":266.26,"r":299.3,"b":266.28},{"p":0,"c":"g","l":299.9,"t":257.76,"r":307.25,"b":269.64},{"p":0,"c":"u","l":309.3,"t":257.93,"r":316.06,"b":266.46},{"p":0,"c":"í","l":318.4,"t":254.7,"r":321.29,"b":266.28},{"p":0,"c":"a","l":322.06,"t":257.76,"r":329.75,"b":266.46},{"p":0,"c":" ","l":330.37,"t":266.26,"r":334.84,"b":266.28},{"p":0,"c":"a","l":335.51,"t":257.76,"r":343.19,"b":266.46},{"p":0,"c":"l","l":344.84,"t":254.77,"r":346.26,"b":266.28},{"p":0,"c":" ","l":347.17,"t":266.26,"r":351.64,"b":266.28},{"p":0,"c":"c","l":352.35,"t":257.76,"r":359.62,"b":266.46},{"p":0,"c":"a","l":360.47,"t":257.76,"r":368.15,"b":266.46},{"p":0,"c":"m","l":369.6,"t":257.76,"r":380.9,"b":266.28},{"p":0,"c":"i","l":382.79,"t":254.77,"r":384.21,"b":266.28},{"p":0,"c":"n","l":386.39,"t":257.76,"r":393.16,"b":266.28},{"p":0,"c":"a","l":394.79,"t":257.76,"r":402.48,"b":266.46},{"p":0,"c":"r","l":404.14,"t":257.76,"r":408.68,"b":266.28},{"p":0,"c":"\r","l":403.43,"t":266.28,"r":403.43,"b":266.28},{"p":0,"c":"\n","l":403.43,"t":266.28,"r":403.43,"b":266.28},{"p":0,"c":" ","l":138.04,"t":299.15,"r":141.38,"b":299.16},{"p":0,"c":"D","l":235.53,"t":290.57,"r":243.54,"b":299.16},{"p":0,"c":" ","l":243.64,"t":299.15,"r":246.98,"b":299.16},{"p":0,"c":"\r","l":243.92,"t":299.16,"r":243.92,"b":299.16},{"p":0,"c":"\n","l":243.92,"t":299.16,"r":243.92,"b":299.16},{"p":0,"c":"C","l":28.1,"t":306.55,"r":36.91,"b":316.83},{"p":0,"c":"O","l":38.15,"t":306.53,"r":47.68,"b":316.83},{"p":0,"c":"R","l":49.38,"t":306.71,"r":58.15,"b":316.68},{"p":0,"c":"O","l":59.03,"t":306.53,"r":68.57,"b":316.83},{"p":0,"c":" ","l":59.14,"t":316.68,"r":59.14,"b":316.68},{"p":0,"c":"F","l":139.36,"t":305.17,"r":147.13,"b":316.68},{"p":0,"c":"u","l":148.91,"t":308.33,"r":155.66,"b":316.86},{"p":0,"c":"i","l":157.82,"t":305.17,"r":159.23,"b":316.68},{"p":0,"c":"m","l":161.42,"t":308.16,"r":172.72,"b":316.68},{"p":0,"c":"o","l":174.33,"t":308.16,"r":182.14,"b":316.86},{"p":0,"c":"s","l":183.17,"t":308.16,"r":190.08,"b":316.86},{"p":0,"c":" ","l":190.6,"t":316.66,"r":195.07,"b":316.68},{"p":0,"c":"r","l":196.21,"t":308.16,"r":200.74,"b":316.68},{"p":0,"c":"e","l":201.03,"t":308.16,"r":208.71,"b":316.86},{"p":0,"c":"s","l":209.81,"t":308.16,"r":216.72,"b":316.86},{"p":0,"c":"c","l":217.86,"t":308.16,"r":225.13,"b":316.86},{"p":0,"c":"a","l":225.98,"t":308.16,"r":233.67,"b":316.86},{"p":0,"c":"t","l":234.57,"t":305.42,"r":238.63,"b":316.78},{"p":0,"c":"a","l":239.42,"t":308.16,"r":247.11,"b":316.86},{"p":0,"c":"d","l":248.26,"t":305.17,"r":255.5,"b":316.86},{"p":0,"c":"o","l":257.12,"t":308.16,"r":264.94,"b":316.86},{"p":0,"c":"s","l":265.72,"t":308.16,"r":272.64,"b":316.86},{"p":0,"c":" ","l":273.39,"t":316.66,"r":277.86,"b":316.68},{"p":0,"c":"d","l":278.5,"t":305.17,"r":285.74,"b":316.86},{"p":0,"c":"e","l":287.42,"t":308.16,"r":295.11,"b":316.86},{"p":0,"c":"l","l":296.73,"t":305.17,"r":298.15,"b":316.68},{"p":0,"c":" ","l":299.06,"t":316.66,"r":303.53,"b":316.68},{"p":0,"c":"p","l":304.69,"t":308.16,"r":311.93,"b":319.86},{"p":0,"c":"e","l":313.1,"t":308.16,"r":320.78,"b":316.86},{"p":0,"c":"c","l":322.0,"t":308.16,"r":329.27,"b":316.86},{"p":0,"c":"a","l":330.12,"t":308.16,"r":337.81,"b":316.86},{"p":0,"c":"d","l":338.97,"t":305.17,"r":346.2,"b":316.86},{"p":0,"c":"o","l":347.82,"t":308.16,"r":355.64,"b":316.86},{"p":0,"c":" ","l":167.56,"t":331.31,"r":170.9,"b":331.32},{"p":0,"c":"G","l":232.32,"t":322.58,"r":240.35,"b":331.45},{"p":0,"c":" ","l":240.52,"t":331.31,"r":243.86,"b":331.32},{"p":0,"c":"\r","l":240.8,"t":331.32,"r":240.8,"b":331.32},{"p":0,"c":"\n","l":240.8,"t":331.32,"r":240.8,"b":331.32},{"p":0,"c":"F","l":139.36,"t":337.57,"r":147.13,"b":349.08},{"p":0,"c":"u","l":148.91,"t":340.73,"r":155.66,"b":349.26},{"p":0,"c":"i","l":157.82,"t":337.57,"r":159.23,"b":349.08},{"p":0,"c":"m","l":161.42,"t":340.56,"r":172.72,"b":349.08},{"p":0,"c":"o","l":174.33,"t":340.56,"r":182.14,"b":349.26},{"p":0,"c":"s","l":183.17,"t":340.56,"r":190.08,"b":349.26},{"p":0,"c":" ","l":190.6,"t":349.06,"r":195.07,"b":349.08},{"p":0,"c":"e","l":195.76,"t":340.56,"r":203.44,"b":349.26},{"p":0,"c":"s","l":204.29,"t":340.56,"r":211.21,"b":349.26},{"p":0,"c":"c","l":212.59,"t":340.56,"r":219.86,"b":349.26},{"p":0,"c":"o","l":220.66,"t":340.56,"r":228.47,"b":349.26},{"p":0,"c":"g","l":229.52,"t":340.56,"r":236.87,"b":352.44},{"p":0,"c":"i","l":238.94,"t":337.57,"r":240.35,"b":349.08},{"p":0,"c":"d","l":242.02,"t":337.57,"r":249.26,"b":349.26},{"p":0,"c":"o","l":250.88,"t":340.56,"r":258.7,"b":349.26},{"p":0,"c":"s","l":259.48,"t":340.56,"r":266.4,"b":349.26},{"p":0,"c":" ","l":267.15,"t":349.06,"r":271.62,"b":349.08},{"p":0,"c":"p","l":272.78,"t":340.56,"r":280.02,"b":352.26},{"p":0,"c":"o","l":281.12,"t":340.56,"r":288.94,"b":349.26},{"p":0,"c":"r","l":290.51,"t":340.56,"r":295.05,"b":349.08},{"p":0,"c":" ","l":294.74,"t":349.06,"r":299.21,"b":349.08},{"p":0,"c":"s","l":299.56,"t":340.56,"r":306.48,"b":349.26},{"p":0,"c":"u","l":308.26,"t":340.73,"r":315.01,"b":349.26},{"p":0,"c":" ","l":315.86,"t":349.06,"r":320.33,"b":349.08},{"p":0,"c":"a","l":321.01,"t":340.56,"r":328.69,"b":349.26},{"p":0,"c":"m","l":330.36,"t":340.56,"r":341.67,"b":349.08},{"p":0,"c":"o","l":343.28,"t":340.56,"r":351.09,"b":349.26},{"p":0,"c":"r","l":352.66,"t":340.56,"r":357.2,"b":349.08},{"p":0,"c":"\r","l":351.95,"t":349.08,"r":351.95,"b":349.08},{"p":0,"c":"\n","l":351.95,"t":349.08,"r":351.95,"b":349.08},{"p":0,"c":" ","l":138.04,"t":363.71,"r":141.38,"b":363.72},{"p":0,"c":"A","l":174.77,"t":355.13,"r":182.4,"b":363.72},{"p":0,"c":"s","l":183.38,"t":357.36,"r":188.93,"b":363.85},{"p":0,"c":"u","l":189.68,"t":357.49,"r":195.62,"b":363.85},{"p":0,"c":"s","l":196.1,"t":357.36,"r":201.65,"b":363.85},{"p":0,"c":"4","l":202.18,"t":355.13,"r":208.14,"b":363.72},{"p":0,"c":" ","l":208.36,"t":363.71,"r":211.7,"b":363.72},{"p":0,"c":"B","l":262.16,"t":355.13,"r":269.5,"b":363.72},{"p":0,"c":"m","l":269.96,"t":357.36,"r":279.32,"b":363.72},{"p":0,"c":"7","l":281.09,"t":355.25,"r":286.78,"b":363.72},{"p":0,"c":" ","l":286.36,"t":363.71,"r":289.7,"b":363.72},{"p":0,"c":"G","l":330.72,"t":354.98,"r":338.75,"b":363.85},{"p":0,"c":"\r","l":330.34,"t":363.72,"r":330.34,"b":363.72},{"p":0,"c":"\n","l":330.34,"t":363.72,"r":330.34,"b":363.72},{"p":0,"c":"S","l":138.76,"t":369.53,"r":147.93,"b":381.42},{"p":0,"c":"e","l":149.43,"t":372.72,"r":157.12,"b":381.42},{"p":0,"c":"r","l":158.77,"t":372.72,"r":163.3,"b":381.24},{"p":0,"c":"v","l":163.22,"t":372.89,"r":170.86,"b":381.24},{"p":0,"c":"i","l":172.23,"t":369.73,"r":173.65,"b":381.24},{"p":0,"c":"r","l":175.81,"t":372.72,"r":180.35,"b":381.24},{"p":0,"c":"e","l":180.65,"t":372.72,"r":188.33,"b":381.42},{"p":0,"c":"m","l":190.0,"t":372.72,"r":201.3,"b":381.24},{"p":0,"c":"o","l":202.9,"t":372.72,"r":210.72,"b":381.42},{"p":0,"c":"s","l":211.52,"t":372.72,"r":218.43,"b":381.42},{"p":0,"c":" ","l":219.18,"t":381.22,"r":223.65,"b":381.24},{"p":0,"c":"a","l":224.32,"t":372.72,"r":232.01,"b":381.42},{"p":0,"c":"l","l":233.41,"t":369.73,"r":234.83,"b":381.24},{"p":0,"c":" ","l":235.98,"t":381.22,"r":240.45,"b":381.24},{"p":0,"c":"S","l":241.02,"t":369.53,"r":250.19,"b":381.42},{"p":0,"c":"e","l":251.69,"t":372.72,"r":259.38,"b":381.42},{"p":0,"c":"ñ","l":261.05,"t":369.86,"r":267.82,"b":381.24},{"p":0,"c":"o","l":269.4,"t":372.72,"r":277.22,"b":381.42},{"p":0,"c":"r","l":278.8,"t":372.72,"r":283.34,"b":381.24},{"p":0,"c":",","l":284.33,"t":379.63,"r":286.04,"b":383.51},{"p":0,"c":" ","l":287.56,"t":381.22,"r":292.03,"b":381.24},{"p":0,"c":"s","l":292.38,"t":372.72,"r":299.29,"b":381.42},{"p":0,"c":"e","l":300.64,"t":372.72,"r":308.32,"b":381.42},{"p":0,"c":"r","l":309.97,"t":372.72,"r":314.51,"b":381.24},{"p":0,"c":"v","l":314.42,"t":372.89,"r":322.06,"b":381.24},{"p":0,"c":"i","l":323.43,"t":369.73,"r":324.85,"b":381.24},{"p":0,"c":"r","l":327.01,"t":372.72,"r":331.55,"b":381.24},{"p":0,"c":"e","l":331.85,"t":372.72,"r":339.53,"b":381.42},{"p":0,"c":"m","l":340.96,"t":372.72,"r":352.26,"b":381.24},{"p":0,"c":"o","l":353.86,"t":372.72,"r":361.68,"b":381.42},{"p":0,"c":"s","l":362.72,"t":372.72,"r":369.63,"b":381.42},{"p":0,"c":" ","l":370.14,"t":381.22,"r":374.61,"b":381.24},{"p":0,"c":"a","l":375.28,"t":372.72,"r":382.97,"b":381.42},{"p":0,"c":"l","l":384.37,"t":369.73,"r":385.79,"b":381.24},{"p":0,"c":" ","l":386.94,"t":381.22,"r":391.41,"b":381.24},{"p":0,"c":"S","l":392.23,"t":369.53,"r":401.39,"b":381.42},{"p":0,"c":"e","l":402.9,"t":372.72,"r":410.58,"b":381.42},{"p":0,"c":"ñ","l":412.25,"t":369.86,"r":419.02,"b":381.24},{"p":0,"c":"o","l":420.6,"t":372.72,"r":428.42,"b":381.42},{"p":0,"c":"r","l":430.0,"t":372.72,"r":434.54,"b":381.24},{"p":0,"c":" ","l":31.72,"t":395.87,"r":35.06,"b":395.88},{"p":0,"c":"D","l":244.41,"t":387.29,"r":252.42,"b":395.88},{"p":0,"c":" ","l":252.52,"t":395.87,"r":255.86,"b":395.88},{"p":0,"c":"\r","l":252.8,"t":395.88,"r":252.8,"b":395.88},{"p":0,"c":"\n","l":252.8,"t":395.88,"r":252.8,"b":395.88},{"p":0,"c":"A","l":138.04,"t":401.89,"r":148.78,"b":413.4},{"p":0,"c":"u","l":149.87,"t":405.05,"r":156.62,"b":413.58},{"p":0,"c":"n","l":158.79,"t":404.88,"r":165.56,"b":413.4},{"p":0,"c":"q","l":167.17,"t":404.88,"r":174.39,"b":416.58},{"p":0,"c":"u","l":176.53,"t":405.05,"r":183.28,"b":413.58},{"p":0,"c":"e","l":184.98,"t":404.88,"r":192.66,"b":413.58},{"p":0,"c":" ","l":193.27,"t":413.38,"r":197.74,"b":413.4},{"p":0,"c":"s","l":198.33,"t":404.88,"r":205.24,"b":413.58},{"p":0,"c":"e","l":206.59,"t":404.88,"r":214.27,"b":413.58},{"p":0,"c":" ","l":214.64,"t":413.38,"r":219.11,"b":413.4},{"p":0,"c":"l","l":220.22,"t":401.89,"r":221.64,"b":413.4},{"p":0,"c":"e","l":223.39,"t":404.88,"r":231.07,"b":413.58},{"p":0,"c":"v","l":231.64,"t":405.05,"r":239.28,"b":413.4},{"p":0,"c":"a","l":240.18,"t":404.88,"r":247.86,"b":413.58},{"p":0,"c":"n","l":249.55,"t":404.88,"r":256.31,"b":413.4},{"p":0,"c":"t","l":257.66,"t":402.14,"r":261.73,"b":413.5},{"p":0,"c":"e","l":262.52,"t":404.88,"r":270.21,"b":413.58},{"p":0,"c":"n","l":271.88,"t":404.88,"r":278.65,"b":413.4},{"p":0,"c":" ","l":279.7,"t":413.38,"r":284.17,"b":413.4},{"p":0,"c":"e","l":284.86,"t":404.88,"r":292.54,"b":413.58},{"p":0,"c":"n","l":294.21,"t":404.88,"r":300.98,"b":413.4},{"p":0,"c":"e","l":302.63,"t":404.88,"r":310.31,"b":413.58},{"p":0,"c":"m","l":311.98,"t":404.88,"r":323.28,"b":413.4},{"p":0,"c":"i","l":325.18,"t":401.89,"r":326.59,"b":413.4},{"p":0,"c":"g","l":328.22,"t":404.88,"r":335.57,"b":416.76},{"p":0,"c":"o","l":337.13,"t":404.88,"r":344.94,"b":413.58},{"p":0,"c":"s","l":345.98,"t":404.88,"r":352.89,"b":413.58},{"p":0,"c":" ","l":239.56,"t":428.03,"r":242.9,"b":428.04},{"p":0,"c":"G","l":260.88,"t":419.3,"r":268.91,"b":428.17},{"p":0,"c":" ","l":269.08,"t":428.03,"r":272.42,"b":428.04},{"p":0,"c":"\r","l":269.36,"t":428.04,"r":269.36,"b":428.04},{"p":0,"c":"\n","l":269.36,"t":428.04,"r":269.36,"b":428.04},{"p":0,"c":"A","l":138.04,"t":434.05,"r":148.78,"b":445.56},{"p":0,"c":"u","l":149.87,"t":437.21,"r":156.62,"b":445.74},{"p":0,"c":"n","l":158.79,"t":437.04,"r":165.56,"b":445.56},{"p":0,"c":"q","l":167.17,"t":437.04,"r":174.39,"b":448.74},{"p":0,"c":"u","l":176.53,"t":437.21,"r":183.28,"b":445.74},{"p":0,"c":"e","l":184.98,"t":437.04,"r":192.66,"b":445.74},{"p":0,"c":" ","l":193.27,"t":445.54,"r":197.74,"b":445.56},{"p":0,"c":"v","l":198.04,"t":437.21,"r":205.68,"b":445.56},{"p":0,"c":"e","l":206.59,"t":437.04,"r":214.27,"b":445.74},{"p":0,"c":"n","l":215.94,"t":437.04,"r":222.71,"b":445.56},{"p":0,"c":"g","l":224.28,"t":437.04,"r":231.63,"b":448.92},{"p":0,"c":"a","l":233.23,"t":437.04,"r":240.91,"b":445.74},{"p":0,"c":" ","l":241.29,"t":445.54,"r":245.76,"b":445.56},{"p":0,"c":"p","l":246.91,"t":437.04,"r":254.15,"b":448.74},{"p":0,"c":"r","l":255.78,"t":437.04,"r":260.32,"b":445.56},{"p":0,"c":"u","l":261.05,"t":437.21,"r":267.81,"b":445.74},{"p":0,"c":"e","l":269.5,"t":437.04,"r":277.19,"b":445.74},{"p":0,"c":"b","l":278.84,"t":434.05,"r":286.08,"b":445.74},{"p":0,"c":"a","l":287.26,"t":437.04,"r":294.95,"b":445.74},{"p":0,"c":" ","l":295.57,"t":445.54,"r":300.04,"b":445.56},{"p":0,"c":"o","l":300.66,"t":437.04,"r":308.47,"b":445.74},{"p":0,"c":" ","l":309.01,"t":445.54,"r":313.48,"b":445.56},{"p":0,"c":"a","l":314.15,"t":437.04,"r":321.84,"b":445.74},{"p":0,"c":"f","l":322.6,"t":433.85,"r":327.49,"b":445.56},{"p":0,"c":"l","l":328.05,"t":434.05,"r":329.46,"b":445.56},{"p":0,"c":"i","l":331.43,"t":434.05,"r":332.85,"b":445.56},{"p":0,"c":"c","l":334.6,"t":437.04,"r":341.86,"b":445.74},{"p":0,"c":"c","l":342.52,"t":437.04,"r":349.78,"b":445.74},{"p":0,"c":"i","l":351.11,"t":434.05,"r":352.53,"b":445.56},{"p":0,"c":"ó","l":354.18,"t":433.98,"r":361.99,"b":445.74},{"p":0,"c":"n","l":363.59,"t":437.04,"r":370.36,"b":445.56},{"p":0,"c":"\r","l":363.09,"t":445.56,"r":363.09,"b":445.56},{"p":0,"c":"\n","l":363.09,"t":445.56,"r":363.09,"b":445.56},{"p":0,"c":" ","l":142.6,"t":460.18,"r":147.07,"b":460.2},{"p":0,"c":"A","l":173.57,"t":451.61,"r":181.2,"b":460.2},{"p":0,"c":"s","l":182.18,"t":453.84,"r":187.73,"b":460.33},{"p":0,"c":"u","l":188.48,"t":453.97,"r":194.42,"b":460.33},{"p":0,"c":"s","l":194.9,"t":453.84,"r":200.45,"b":460.33},{"p":0,"c":"4","l":200.98,"t":451.61,"r":206.94,"b":460.2},{"p":0,"c":" ","l":207.16,"t":460.19,"r":210.5,"b":460.2},{"p":0,"c":"B","l":260.96,"t":451.61,"r":268.3,"b":460.2},{"p":0,"c":"m","l":268.76,"t":453.84,"r":278.12,"b":460.2},{"p":0,"c":"7","l":279.89,"t":451.73,"r":285.58,"b":460.2},{"p":0,"c":" ","l":285.16,"t":460.19,"r":288.5,"b":460.2},{"p":0,"c":"G","l":329.76,"t":451.46,"r":337.79,"b":460.33},{"p":0,"c":" ","l":419.56,"t":460.19,"r":422.9,"b":460.2},{"p":0,"c":"D","l":446.97,"t":451.61,"r":454.98,"b":460.2},{"p":0,"c":" ","l":455.08,"t":460.19,"r":458.42,"b":460.2},{"p":0,"c":"|","l":462.9,"t":451.46,"r":463.82,"b":462.71},{"p":0,"c":" ","l":464.92,"t":460.19,"r":468.26,"b":460.2},{"p":0,"c":"G","l":472.8,"t":451.46,"r":480.83,"b":460.33},{"p":0,"c":"\r","l":472.42,"t":460.2,"r":472.42,"b":460.2},{"p":0,"c":"\n","l":472.42,"t":460.2,"r":472.42,"b":460.2},{"p":0,"c":"S","l":138.76,"t":466.01,"r":147.93,"b":477.9},{"p":0,"c":"e","l":149.43,"t":469.2,"r":157.12,"b":477.9},{"p":0,"c":"r","l":158.77,"t":469.2,"r":163.3,"b":477.72},{"p":0,"c":"v","l":163.22,"t":469.37,"r":170.86,"b":477.72},{"p":0,"c":"i","l":172.23,"t":466.21,"r":173.65,"b":477.72},{"p":0,"c":"r","l":175.81,"t":469.2,"r":180.35,"b":477.72},{"p":0,"c":"e","l":180.65,"t":469.2,"r":188.33,"b":477.9},{"p":0,"c":"m","l":190.0,"t":469.2,"r":201.3,"b":477.72},{"p":0,"c":"o","l":202.9,"t":469.2,"r":210.72,"b":477.9},{"p":0,"c":"s","l":211.52,"t":469.2,"r":218.43,"b":477.9},{"p":0,"c":" ","l":219.18,"t":477.7,"r":223.65,"b":477.72},{"p":0,"c":"a","l":224.32,"t":469.2,"r":232.01,"b":477.9},{"p":0,"c":"l","l":233.41,"t":466.21,"r":234.83,"b":477.72},{"p":0,"c":" ","l":235.98,"t":477.7,"r":240.45,"b":477.72},{"p":0,"c":"S","l":241.02,"t":466.01,"r":250.19,"b":477.9},{"p":0,"c":"e","l":251.69,"t":469.2,"r":259.38,"b":477.9},{"p":0,"c":"ñ","l":261.05,"t":466.34,"r":267.82,"b":477.72},{"p":0,"c":"o","l":269.4,"t":469.2,"r":277.22,"b":477.9},{"p":0,"c":"r","l":278.8,"t":469.2,"r":283.34,"b":477.72},{"p":0,"c":",","l":284.33,"t":476.11,"r":286.04,"b":479.99},{"p":0,"c":" ","l":287.56,"t":477.7,"r":292.03,"b":477.72},{"p":0,"c":"s","l":292.38,"t":469.2,"r":299.29,"b":477.9},{"p":0,"c":"e","l":300.64,"t":469.2,"r":308.32,"b":477.9},{"p":0,"c":"r","l":309.97,"t":469.2,"r":314.51,"b":477.72},{"p":0,"c":"v","l":314.42,"t":469.37,"r":322.06,"b":477.72},{"p":0,"c":"i","l":323.43,"t":466.21,"r":324.85,"b":477.72},{"p":0,"c":"r","l":327.01,"t":469.2,"r":331.55,"b":477.72},{"p":0,"c":"e","l":331.85,"t":469.2,"r":339.53,"b":477.9},{"p":0,"c":"m","l":340.96,"t":469.2,"r":352.26,"b":477.72},{"p":0,"c":"o","l":353.86,"t":469.2,"r":361.68,"b":477.9},{"p":0,"c":"s","l":362.72,"t":469.2,"r":369.63,"b":477.9},{"p":0,"c":" ","l":370.14,"t":477.7,"r":374.61,"b":477.72},{"p":0,"c":"a","l":375.28,"t":469.2,"r":382.97,"b":477.9},{"p":0,"c":"l","l":384.37,"t":466.21,"r":385.79,"b":477.72},{"p":0,"c":" ","l":386.94,"t":477.7,"r":391.41,"b":477.72},{"p":0,"c":"S","l":392.23,"t":466.01,"r":401.39,"b":477.9},{"p":0,"c":"e","l":402.9,"t":469.2,"r":410.58,"b":477.9},{"p":0,"c":"ñ","l":412.25,"t":466.34,"r":419.02,"b":477.72},{"p":0,"c":"o","l":420.6,"t":469.2,"r":428.42,"b":477.9},{"p":0,"c":"r","l":430.0,"t":469.2,"r":434.54,"b":477.72},{"p":0,"c":"\r","l":429.29,"t":477.72,"r":429.29,"b":477.72},{"p":0,"c":"\n","l":429.29,"t":477.72,"r":429.29,"b":477.72},{"p":0,"c":" ","l":167.56,"t":510.83,"r":170.9,"b":510.84},{"p":0,"c":"D","l":201.69,"t":502.25,"r":209.7,"b":510.84},{"p":0,"c":" ","l":209.8,"t":510.83,"r":213.14,"b":510.84},{"p":0,"c":"G","l":317.52,"t":502.1,"r":325.55,"b":510.97},{"p":0,"c":" ","l":325.72,"t":510.83,"r":329.06,"b":510.84},{"p":0,"c":"\r","l":326.0,"t":510.84,"r":326.0,"b":510.84},{"p":0,"c":"\n","l":326.0,"t":510.84,"r":326.0,"b":510.84},{"p":0,"c":"V","l":31.78,"t":518.39,"r":40.89,"b":528.36},{"p":0,"c":"E","l":42.18,"t":518.39,"r":49.61,"b":528.36},{"p":0,"c":"R","l":51.54,"t":518.39,"r":60.31,"b":528.36},{"p":0,"c":"S","l":61.15,"t":518.23,"r":69.08,"b":528.51},{"p":0,"c":"O","l":70.55,"t":518.21,"r":80.09,"b":528.51},{"p":0,"c":" ","l":80.68,"t":528.35,"r":84.55,"b":528.36},{"p":0,"c":"2","l":84.91,"t":518.35,"r":91.51,"b":528.36},{"p":0,"c":" ","l":85.07,"t":528.36,"r":85.07,"b":528.36},{"p":0,"c":"E","l":139.31,"t":516.85,"r":147.9,"b":528.36},{"p":0,"c":"n","l":149.9,"t":519.84,"r":156.67,"b":528.36},{"p":0,"c":" ","l":157.73,"t":528.34,"r":162.2,"b":528.36},{"p":0,"c":"o","l":162.82,"t":519.84,"r":170.63,"b":528.54},{"p":0,"c":"b","l":172.22,"t":516.85,"r":179.45,"b":528.54},{"p":0,"c":"e","l":180.65,"t":519.84,"r":188.34,"b":528.54},{"p":0,"c":"d","l":189.49,"t":516.85,"r":196.73,"b":528.54},{"p":0,"c":"i","l":198.89,"t":516.85,"r":200.3,"b":528.36},{"p":0,"c":"e","l":202.02,"t":519.84,"r":209.71,"b":528.54},{"p":0,"c":"n","l":211.37,"t":519.84,"r":218.14,"b":528.36},{"p":0,"c":"c","l":219.82,"t":519.84,"r":227.09,"b":528.54},{"p":0,"c":"i","l":228.18,"t":516.85,"r":229.59,"b":528.36},{"p":0,"c":"a","l":231.29,"t":519.84,"r":238.98,"b":528.54},{"p":0,"c":",","l":240.93,"t":526.75,"r":242.64,"b":530.63},{"p":0,"c":" ","l":244.16,"t":528.34,"r":248.63,"b":528.36},{"p":0,"c":"t","l":248.77,"t":517.1,"r":252.84,"b":528.46},{"p":0,"c":"e","l":253.63,"t":519.84,"r":261.32,"b":528.54},{"p":0,"c":"m","l":262.98,"t":519.84,"r":274.29,"b":528.36},{"p":0,"c":"o","l":275.89,"t":519.84,"r":283.71,"b":528.54},{"p":0,"c":"r","l":285.29,"t":519.84,"r":289.83,"b":528.36},{"p":0,"c":" ","l":289.29,"t":528.34,"r":293.76,"b":528.36},{"p":0,"c":"y","l":294.11,"t":520.01,"r":301.74,"b":531.72},{"p":0,"c":" ","l":301.77,"t":528.34,"r":306.24,"b":528.36},{"p":0,"c":"g","l":306.84,"t":519.84,"r":314.19,"b":531.72},{"p":0,"c":"r","l":316.26,"t":519.84,"r":320.8,"b":528.36},{"p":0,"c":"a","l":321.08,"t":519.84,"r":328.76,"b":528.54},{"p":0,"c":"t","l":329.67,"t":517.1,"r":333.74,"b":528.46},{"p":0,"c":"i","l":335.01,"t":516.85,"r":336.42,"b":528.36},{"p":0,"c":"t","l":337.59,"t":517.1,"r":341.66,"b":528.46},{"p":0,"c":"u","l":342.89,"t":520.01,"r":349.64,"b":528.54},{"p":0,"c":"d","l":351.29,"t":516.85,"r":358.53,"b":528.54},{"p":0,"c":"\r","l":351.3,"t":528.36,"r":351.3,"b":528.36},{"p":0,"c":"\n","l":351.3,"t":528.36,"r":351.3,"b":528.36},{"p":0,"c":" ","l":138.04,"t":542.99,"r":141.38,"b":543.0},{"p":0,"c":"B","l":202.16,"t":534.41,"r":209.5,"b":543.0},{"p":0,"c":"m","l":209.96,"t":536.64,"r":219.32,"b":543.0},{"p":0,"c":" ","l":219.64,"t":542.99,"r":222.98,"b":543.0},{"p":0,"c":"A","l":302.69,"t":534.41,"r":310.32,"b":543.0},{"p":0,"c":" ","l":310.84,"t":542.99,"r":314.18,"b":543.0},{"p":0,"c":"G","l":412.08,"t":534.26,"r":420.11,"b":543.13},{"p":0,"c":"\r","l":411.7,"t":543.0,"r":411.7,"b":543.0},{"p":0,"c":"\n","l":411.7,"t":543.0,"r":411.7,"b":543.0},{"p":0,"c":"N","l":139.26,"t":549.01,"r":148.33,"b":560.52},{"p":0,"c":"o","l":150.09,"t":552.0,"r":157.91,"b":560.7},{"p":0,"c":"s","l":158.94,"t":552.0,"r":165.86,"b":560.7},{"p":0,"c":" ","l":166.6,"t":560.5,"r":171.07,"b":560.52},{"p":0,"c":"r","l":172.2,"t":552.0,"r":176.74,"b":560.52},{"p":0,"c":"e","l":177.03,"t":552.0,"r":184.72,"b":560.7},{"p":0,"c":"n","l":186.38,"t":552.0,"r":193.15,"b":560.52},{"p":0,"c":"d","l":194.75,"t":549.01,"r":201.99,"b":560.7},{"p":0,"c":"i","l":204.15,"t":549.01,"r":205.56,"b":560.52},{"p":0,"c":"m","l":207.76,"t":552.0,"r":219.06,"b":560.52},{"p":0,"c":"o","l":220.66,"t":552.0,"r":228.47,"b":560.7},{"p":0,"c":"s","l":229.27,"t":552.0,"r":236.18,"b":560.7},{"p":0,"c":" ","l":236.93,"t":560.5,"r":241.4,"b":560.52},{"p":0,"c":"a","l":242.06,"t":552.0,"r":249.75,"b":560.7},{"p":0,"c":"n","l":251.43,"t":552.0,"r":258.2,"b":560.52},{"p":0,"c":"t","l":259.3,"t":549.26,"r":263.37,"b":560.62},{"p":0,"c":"e","l":264.16,"t":552.0,"r":271.85,"b":560.7},{"p":0,"c":" ","l":272.45,"t":560.5,"r":276.92,"b":560.52},{"p":0,"c":"a","l":277.59,"t":552.0,"r":285.27,"b":560.7},{"p":0,"c":"q","l":286.45,"t":552.0,"r":293.67,"b":563.7},{"p":0,"c":"u","l":295.8,"t":552.17,"r":302.55,"b":560.7},{"p":0,"c":"e","l":304.25,"t":552.0,"r":311.94,"b":560.7},{"p":0,"c":"l","l":313.57,"t":549.01,"r":314.98,"b":560.52},{"p":0,"c":" ","l":316.15,"t":560.5,"r":320.62,"b":560.52},{"p":0,"c":"q","l":321.27,"t":552.0,"r":328.49,"b":563.7},{"p":0,"c":"u","l":330.61,"t":552.17,"r":337.37,"b":560.7},{"p":0,"c":"e","l":339.06,"t":552.0,"r":346.75,"b":560.7},{"p":0,"c":" ","l":347.11,"t":560.5,"r":351.58,"b":560.52},{"p":0,"c":"n","l":352.73,"t":552.0,"r":359.5,"b":560.52},{"p":0,"c":"o","l":361.08,"t":552.0,"r":368.89,"b":560.7},{"p":0,"c":"s","l":369.93,"t":552.0,"r":376.84,"b":560.7},{"p":0,"c":" ","l":377.35,"t":560.5,"r":381.82,"b":560.52},{"p":0,"c":"l","l":382.69,"t":549.01,"r":384.11,"b":560.52},{"p":0,"c":"l","l":386.3,"t":549.01,"r":387.72,"b":560.52},{"p":0,"c":"a","l":389.46,"t":552.0,"r":397.15,"b":560.7},{"p":0,"c":"m","l":398.83,"t":552.0,"r":410.13,"b":560.52},{"p":0,"c":"ó","l":411.73,"t":548.94,"r":419.54,"b":560.7},{"p":0,"c":" ","l":203.56,"t":575.15,"r":206.9,"b":575.16},{"p":0,"c":"D","l":224.25,"t":566.57,"r":232.26,"b":575.16},{"p":0,"c":" ","l":232.36,"t":575.15,"r":235.7,"b":575.16},{"p":0,"c":"G","l":347.04,"t":566.42,"r":355.07,"b":575.29},{"p":0,"c":" ","l":355.0,"t":575.15,"r":358.34,"b":575.16},{"p":0,"c":"\r","l":355.28,"t":575.16,"r":355.28,"b":575.16},{"p":0,"c":"\n","l":355.28,"t":575.16,"r":355.28,"b":575.16},{"p":0,"c":"P","l":139.28,"t":581.17,"r":148.07,"b":592.68},{"p":0,"c":"u","l":149.87,"t":584.33,"r":156.62,"b":592.86},{"p":0,"c":"e","l":158.32,"t":584.16,"r":166.01,"b":592.86},{"p":0,"c":"b","l":167.66,"t":581.17,"r":174.89,"b":592.86},{"p":0,"c":"l","l":176.53,"t":581.17,"r":177.94,"b":592.68},{"p":0,"c":"o","l":179.62,"t":584.16,"r":187.44,"b":592.86},{"p":0,"c":" ","l":187.98,"t":592.66,"r":192.45,"b":592.68},{"p":0,"c":"a","l":193.12,"t":584.16,"r":200.8,"b":592.86},{"p":0,"c":"d","l":201.97,"t":581.17,"r":209.21,"b":592.86},{"p":0,"c":"q","l":210.87,"t":584.16,"r":218.09,"b":595.86},{"p":0,"c":"u","l":220.22,"t":584.33,"r":226.98,"b":592.86},{"p":0,"c":"i","l":229.14,"t":581.17,"r":230.56,"b":592.68},{"p":0,"c":"r","l":232.72,"t":584.16,"r":237.26,"b":592.68},{"p":0,"c":"i","l":238.02,"t":581.17,"r":239.44,"b":592.68},{"p":0,"c":"d","l":241.1,"t":581.17,"r":248.34,"b":592.86},{"p":0,"c":"o","l":249.97,"t":584.16,"r":257.79,"b":592.86},{"p":0,"c":" ","l":258.33,"t":592.66,"r":262.8,"b":592.68},{"p":0,"c":"a","l":263.47,"t":584.16,"r":271.15,"b":592.86},{"p":0,"c":" ","l":271.53,"t":592.66,"r":276.0,"b":592.68},{"p":0,"c":"p","l":277.15,"t":584.16,"r":284.39,"b":595.86},{"p":0,"c":"r","l":286.02,"t":584.16,"r":290.56,"b":592.68},{"p":0,"c":"e","l":290.86,"t":584.16,"r":298.54,"b":592.86},{"p":0,"c":"c","l":299.78,"t":584.16,"r":307.04,"b":592.86},{"p":0,"c":"i","l":308.37,"t":581.17,"r":309.79,"b":592.68},{"p":0,"c":"o","l":311.44,"t":584.16,"r":319.25,"b":592.86},{"p":0,"c":" ","l":319.55,"t":592.66,"r":324.02,"b":592.68},{"p":0,"c":"d","l":324.66,"t":581.17,"r":331.89,"b":592.86},{"p":0,"c":"e","l":333.59,"t":584.16,"r":341.28,"b":592.86},{"p":0,"c":" ","l":341.88,"t":592.66,"r":346.35,"b":592.68},{"p":0,"c":"s","l":346.7,"t":584.16,"r":353.61,"b":592.86},{"p":0,"c":"a","l":354.94,"t":584.16,"r":362.63,"b":592.86},{"p":0,"c":"n","l":364.31,"t":584.16,"r":371.08,"b":592.68},{"p":0,"c":"g","l":372.65,"t":584.16,"r":380.0,"b":596.04},{"p":0,"c":"r","l":382.07,"t":584.16,"r":386.6,"b":592.68},{"p":0,"c":"e","l":386.9,"t":584.16,"r":394.59,"b":592.86},{"p":0,"c":"\r","l":386.86,"t":592.68,"r":386.86,"b":592.68},{"p":0,"c":"\n","l":386.86,"t":592.68,"r":386.86,"b":592.68},{"p":0,"c":" ","l":138.04,"t":607.31,"r":141.38,"b":607.32},{"p":0,"c":"B","l":188.72,"t":598.73,"r":196.06,"b":607.32},{"p":0,"c":"m","l":196.52,"t":600.96,"r":205.88,"b":607.32},{"p":0,"c":" ","l":206.2,"t":607.31,"r":209.54,"b":607.32},{"p":0,"c":"A","l":259.49,"t":598.73,"r":267.12,"b":607.32},{"p":0,"c":" ","l":267.64,"t":607.31,"r":270.98,"b":607.32},{"p":0,"c":"G","l":362.16,"t":598.58,"r":370.19,"b":607.45},{"p":0,"c":"\r","l":361.78,"t":607.32,"r":361.78,"b":607.32},{"p":0,"c":"\n","l":361.78,"t":607.32,"r":361.78,"b":607.32},{"p":0,"c":"P","l":139.28,"t":613.57,"r":148.07,"b":625.08},{"p":0,"c":"a","l":149.42,"t":616.56,"r":157.1,"b":625.26},{"p":0,"c":"r","l":158.77,"t":616.56,"r":163.3,"b":625.08},{"p":0,"c":"a","l":163.59,"t":616.56,"r":171.27,"b":625.26},{"p":0,"c":" ","l":171.89,"t":625.06,"r":176.37,"b":625.08},{"p":0,"c":"d","l":177.0,"t":613.57,"r":184.24,"b":625.26},{"p":0,"c":"a","l":185.92,"t":616.56,"r":193.61,"b":625.26},{"p":0,"c":"r","l":195.27,"t":616.56,"r":199.81,"b":625.08},{"p":0,"c":" ","l":199.51,"t":625.06,"r":203.98,"b":625.08},{"p":0,"c":"a","l":204.65,"t":616.56,"r":212.34,"b":625.26},{"p":0,"c":" ","l":212.96,"t":625.06,"r":217.43,"b":625.08},{"p":0,"c":"c","l":217.9,"t":616.56,"r":225.17,"b":625.26},{"p":0,"c":"o","l":225.97,"t":616.56,"r":233.78,"b":625.26},{"p":0,"c":"n","l":235.39,"t":616.56,"r":242.15,"b":625.08},{"p":0,"c":"o","l":243.74,"t":616.56,"r":251.56,"b":625.26},{"p":0,"c":"c","l":252.72,"t":616.56,"r":259.99,"b":625.26},{"p":0,"c":"e","l":260.85,"t":616.56,"r":268.54,"b":625.26},{"p":0,"c":"r","l":270.19,"t":616.56,"r":274.72,"b":625.08},{"p":0,"c":" ","l":274.19,"t":625.06,"r":278.66,"b":625.08},{"p":0,"c":"d","l":279.23,"t":613.57,"r":286.46,"b":625.26},{"p":0,"c":"e","l":288.15,"t":616.56,"r":295.84,"b":625.26},{"p":0,"c":" ","l":296.44,"t":625.06,"r":300.91,"b":625.08},{"p":0,"c":"s","l":301.25,"t":616.56,"r":308.16,"b":625.26},{"p":0,"c":"u","l":309.94,"t":616.73,"r":316.69,"b":625.26},{"p":0,"c":" ","l":317.79,"t":625.06,"r":322.26,"b":625.08},{"p":0,"c":"b","l":323.39,"t":613.57,"r":330.62,"b":625.26},{"p":0,"c":"o","l":331.75,"t":616.56,"r":339.57,"b":625.26},{"p":0,"c":"n","l":341.16,"t":616.56,"r":347.93,"b":625.08},{"p":0,"c":"d","l":349.53,"t":613.57,"r":356.76,"b":625.26},{"p":0,"c":"a","l":358.44,"t":616.56,"r":366.12,"b":625.26},{"p":0,"c":"d","l":367.28,"t":613.57,"r":374.52,"b":625.26},{"p":0,"c":"\r","l":367.29,"t":625.08,"r":367.29,"b":625.08},{"p":0,"c":"\n","l":367.29,"t":625.08,"r":367.29,"b":625.08},{"p":0,"c":"I","l":32.84,"t":667.85,"r":33.98,"b":676.44},{"p":0,"c":"N","l":35.99,"t":667.85,"r":42.76,"b":676.44},{"p":0,"c":"S","l":44.26,"t":667.7,"r":51.1,"b":676.57},{"p":0,"c":"T","l":51.92,"t":667.85,"r":58.73,"b":676.44},{"p":0,"c":"R","l":60.03,"t":667.85,"r":67.59,"b":676.44},{"p":0,"c":"U","l":68.67,"t":667.85,"r":75.42,"b":676.57},{"p":0,"c":"M","l":77.25,"t":667.85,"r":85.44,"b":676.44},{"p":0,"c":"E","l":87.39,"t":667.85,"r":93.8,"b":676.44},{"p":0,"c":"N","l":95.27,"t":667.85,"r":102.04,"b":676.44},{"p":0,"c":"T","l":103.28,"t":667.85,"r":110.09,"b":676.44},{"p":0,"c":"A","l":110.44,"t":667.85,"r":118.46,"b":676.44},{"p":0,"c":"L","l":119.24,"t":667.85,"r":124.61,"b":676.44},{"p":0,"c":":","l":126.16,"t":670.21,"r":127.36,"b":676.44},{"p":0,"c":" ","l":128.44,"t":676.43,"r":131.78,"b":676.44},{"p":0,"c":"A","l":146.69,"t":667.85,"r":154.32,"b":676.44},{"p":0,"c":" ","l":154.84,"t":676.43,"r":158.18,"b":676.44},{"p":0,"c":"|","l":162.66,"t":667.7,"r":163.58,"b":678.95},{"p":0,"c":" ","l":164.68,"t":676.43,"r":168.02,"b":676.44},{"p":0,"c":"B","l":171.92,"t":667.85,"r":179.26,"b":676.44},{"p":0,"c":"m","l":179.72,"t":670.08,"r":189.08,"b":676.44},{"p":0,"c":" ","l":189.4,"t":676.43,"r":192.74,"b":676.44},{"p":0,"c":"|","l":197.22,"t":667.7,"r":198.14,"b":678.95},{"p":0,"c":" ","l":199.24,"t":676.43,"r":202.58,"b":676.44},{"p":0,"c":"G","l":203.76,"t":667.7,"r":211.79,"b":676.57},{"p":0,"c":" ","l":211.96,"t":676.43,"r":215.3,"b":676.44},{"p":0,"c":"|","l":219.78,"t":667.7,"r":220.7,"b":678.95},{"p":0,"c":" ","l":221.56,"t":676.43,"r":224.9,"b":676.44},{"p":0,"c":"G","l":226.08,"t":667.7,"r":234.11,"b":676.57},{"p":0,"c":" ","l":234.28,"t":676.43,"r":237.62,"b":676.44},{"p":0,"c":"\r","l":234.56,"t":676.44,"r":234.56,"b":676.44},{"p":0,"c":"\n","l":234.56,"t":676.44,"r":234.56,"b":676.44},{"p":0,"c":" ","l":139.72,"t":690.11,"r":143.06,"b":690.12},{"p":0,"c":"A","l":146.21,"t":681.53,"r":153.84,"b":690.12},{"p":0,"c":" ","l":154.36,"t":690.11,"r":157.7,"b":690.12},{"p":0,"c":"|","l":162.18,"t":681.38,"r":163.1,"b":692.63},{"p":0,"c":" ","l":164.2,"t":690.11,"r":167.54,"b":690.12},{"p":0,"c":"B","l":171.44,"t":681.53,"r":178.78,"b":690.12},{"p":0,"c":"m","l":179.24,"t":683.76,"r":188.6,"b":690.12},{"p":0,"c":" ","l":188.92,"t":690.11,"r":192.26,"b":690.12},{"p":0,"c":"|","l":196.74,"t":681.38,"r":197.66,"b":692.63},{"p":0,"c":" ","l":198.76,"t":690.11,"r":202.1,"b":690.12},{"p":0,"c":"C","l":203.21,"t":681.38,"r":210.88,"b":690.25},{"p":0,"c":" ","l":210.76,"t":690.11,"r":214.1,"b":690.12},{"p":0,"c":"|","l":218.58,"t":681.38,"r":219.5,"b":692.63},{"p":0,"c":" ","l":220.6,"t":690.11,"r":223.94,"b":690.12},{"p":0,"c":"C","l":225.05,"t":681.38,"r":232.72,"b":690.25},{"p":1,"c":" ","l":31.72,"t":51.95,"r":35.06,"b":51.96},{"p":1,"c":"D","l":195.45,"t":43.37,"r":203.46,"b":51.96},{"p":1,"c":" ","l":203.56,"t":51.95,"r":206.9,"b":51.96},{"p":1,"c":"G","l":298.08,"t":43.22,"r":306.11,"b":52.09},{"p":1,"c":" ","l":306.28,"t":51.95,"r":309.62,"b":51.96},{"p":1,"c":"\r","l":306.56,"t":51.96,"r":306.56,"b":51.96},{"p":1,"c":"\n","l":306.56,"t":51.96,"r":306.56,"b":51.96},{"p":1,"c":"M","l":32.75,"t":59.51,"r":42.26,"b":69.48},{"p":1,"c":"E","l":44.34,"t":59.51,"r":51.77,"b":69.48},{"p":1,"c":"D","l":53.67,"t":59.51,"r":61.92,"b":69.48},{"p":1,"c":"L","l":63.71,"t":59.51,"r":69.94,"b":69.48},{"p":1,"c":"E","l":71.47,"t":59.51,"r":78.9,"b":69.48},{"p":1,"c":"Y","l":79.77,"t":59.51,"r":88.9,"b":69.48},{"p":1,"c":" ","l":80.4,"t":69.48,"r":80.4,"b":69.48},{"p":1,"c":"H","l":139.33,"t":57.97,"r":148.36,"b":69.48},{"p":1,"c":"e","l":150.15,"t":60.96,"r":157.84,"b":69.66},{"p":1,"c":" ","l":158.44,"t":69.46,"r":162.91,"b":69.48},{"p":1,"c":"d","l":163.55,"t":57.97,"r":170.78,"b":69.66},{"p":1,"c":"e","l":172.48,"t":60.96,"r":180.16,"b":69.66},{"p":1,"c":"c","l":181.39,"t":60.96,"r":188.66,"b":69.66},{"p":1,"c":"i","l":189.98,"t":57.97,"r":191.4,"b":69.48},{"p":1,"c":"d","l":193.08,"t":57.97,"r":200.31,"b":69.66},{"p":1,"c":"i","l":202.48,"t":57.97,"r":203.89,"b":69.48},{"p":1,"c":"d","l":205.57,"t":57.97,"r":212.81,"b":69.66},{"p":1,"c":"o","l":214.44,"t":60.96,"r":222.25,"b":69.66},{"p":1,"c":" ","l":222.79,"t":69.46,"r":227.26,"b":69.48},{"p":1,"c":"s","l":227.6,"t":60.96,"r":234.52,"b":69.66},{"p":1,"c":"e","l":235.86,"t":60.96,"r":243.54,"b":69.66},{"p":1,"c":"g","l":244.66,"t":60.96,"r":252.01,"b":72.84},{"p":1,"c":"u","l":254.06,"t":61.13,"r":260.81,"b":69.66},{"p":1,"c":"i","l":262.97,"t":57.97,"r":264.39,"b":69.48},{"p":1,"c":"r","l":266.56,"t":60.96,"r":271.1,"b":69.48},{"p":1,"c":" ","l":270.8,"t":69.46,"r":275.27,"b":69.48},{"p":1,"c":"a","l":275.94,"t":60.96,"r":283.62,"b":69.66},{"p":1,"c":" ","l":284.0,"t":69.46,"r":288.47,"b":69.48},{"p":1,"c":"C","l":289.36,"t":57.77,"r":299.54,"b":69.66},{"p":1,"c":"r","l":301.12,"t":60.96,"r":305.65,"b":69.48},{"p":1,"c":"i","l":306.42,"t":57.97,"r":307.83,"b":69.48},{"p":1,"c":"s","l":309.46,"t":60.96,"r":316.38,"b":69.66},{"p":1,"c":"t","l":317.17,"t":58.22,"r":321.24,"b":69.58},{"p":1,"c":"o","l":321.97,"t":60.96,"r":329.78,"b":69.66},{"p":1,"c":"\r","l":321.99,"t":69.48,"r":321.99,"b":69.48},{"p":1,"c":"\n","l":321.99,"t":69.48,"r":321.99,"b":69.48},{"p":1,"c":" ","l":138.04,"t":84.11,"r":141.38,"b":84.12},{"p":1,"c":"B","l":195.44,"t":75.53,"r":202.78,"b":84.12},{"p":1,"c":"m","l":203.24,"t":77.76,"r":212.6,"b":84.12},{"p":1,"c":"7","l":214.37,"t":75.65,"r":220.06,"b":84.12},{"p":1,"c":" ","l":219.64,"t":84.11,"r":222.98,"b":84.12},{"p":1,"c":"A","l":299.33,"t":75.53,"r":306.96,"b":84.12},{"p":1,"c":" ","l":307.48,"t":84.11,"r":310.82,"b":84.12},{"p":1,"c":"\r","l":307.76,"t":84.12,"r":307.76,"b":84.12},{"p":1,"c":"\n","l":307.76,"t":84.12,"r":307.76,"b":84.12},{"p":1,"c":"H","l":139.33,"t":90.13,"r":148.36,"b":101.64},{"p":1,"c":"e","l":150.15,"t":93.12,"r":157.84,"b":101.82},{"p":1,"c":" ","l":158.44,"t":101.62,"r":162.91,"b":101.64},{"p":1,"c":"d","l":163.55,"t":90.13,"r":170.78,"b":101.82},{"p":1,"c":"e","l":172.48,"t":93.12,"r":180.16,"b":101.82},{"p":1,"c":"c","l":181.39,"t":93.12,"r":188.66,"b":101.82},{"p":1,"c":"i","l":189.98,"t":90.13,"r":191.4,"b":101.64},{"p":1,"c":"d","l":193.08,"t":90.13,"r":200.31,"b":101.82},{"p":1,"c":"i","l":202.48,"t":90.13,"r":203.89,"b":101.64},{"p":1,"c":"d","l":205.57,"t":90.13,"r":212.81,"b":101.82},{"p":1,"c":"o","l":214.44,"t":93.12,"r":222.25,"b":101.82},{"p":1,"c":" ","l":222.79,"t":101.62,"r":227.26,"b":101.64},{"p":1,"c":"s","l":227.6,"t":93.12,"r":234.52,"b":101.82},{"p":1,"c":"e","l":235.86,"t":93.12,"r":243.54,"b":101.82},{"p":1,"c":"g","l":244.66,"t":93.12,"r":252.01,"b":105.0},{"p":1,"c":"u","l":254.06,"t":93.29,"r":260.81,"b":101.82},{"p":1,"c":"i","l":262.97,"t":90.13,"r":264.39,"b":101.64},{"p":1,"c":"r","l":266.56,"t":93.12,"r":271.1,"b":101.64},{"p":1,"c":" ","l":270.8,"t":101.62,"r":275.27,"b":101.64},{"p":1,"c":"a","l":275.94,"t":93.12,"r":283.62,"b":101.82},{"p":1,"c":" ","l":284.0,"t":101.62,"r":288.47,"b":101.64},{"p":1,"c":"C","l":289.36,"t":89.93,"r":299.54,"b":101.82},{"p":1,"c":"r","l":301.12,"t":93.12,"r":305.65,"b":101.64},{"p":1,"c":"i","l":306.42,"t":90.13,"r":307.83,"b":101.64},{"p":1,"c":"s","l":309.46,"t":93.12,"r":316.38,"b":101.82},{"p":1,"c":"t","l":317.17,"t":90.38,"r":321.24,"b":101.74},{"p":1,"c":"o","l":321.97,"t":93.12,"r":329.78,"b":101.82},{"p":1,"c":"\r","l":321.99,"t":101.64,"r":321.99,"b":101.64},{"p":1,"c":"\n","l":321.99,"t":101.64,"r":321.99,"b":101.64},{"p":1,"c":" ","l":138.04,"t":116.27,"r":141.38,"b":116.28},{"p":1,"c":"D","l":195.45,"t":107.69,"r":203.46,"b":116.28},{"p":1,"c":" ","l":203.56,"t":116.27,"r":206.9,"b":116.28},{"p":1,"c":"G","l":298.08,"t":107.54,"r":306.11,"b":116.41},{"p":1,"c":" ","l":306.28,"t":116.27,"r":309.62,"b":116.28},{"p":1,"c":"\r","l":306.56,"t":116.28,"r":306.56,"b":116.28},{"p":1,"c":"\n","l":306.56,"t":116.28,"r":306.56,"b":116.28},{"p":1,"c":"H","l":139.33,"t":122.29,"r":148.36,"b":133.8},{"p":1,"c":"e","l":150.15,"t":125.28,"r":157.84,"b":133.98},{"p":1,"c":" ","l":158.44,"t":133.78,"r":162.91,"b":133.8},{"p":1,"c":"d","l":163.55,"t":122.29,"r":170.78,"b":133.98},{"p":1,"c":"e","l":172.48,"t":125.28,"r":180.16,"b":133.98},{"p":1,"c":"c","l":181.39,"t":125.28,"r":188.66,"b":133.98},{"p":1,"c":"i","l":189.98,"t":122.29,"r":191.4,"b":133.8},{"p":1,"c":"d","l":193.08,"t":122.29,"r":200.31,"b":133.98},{"p":1,"c":"i","l":202.48,"t":122.29,"r":203.89,"b":133.8},{"p":1,"c":"d","l":205.57,"t":122.29,"r":212.81,"b":133.98},{"p":1,"c":"o","l":214.44,"t":125.28,"r":222.25,"b":133.98},{"p":1,"c":" ","l":222.79,"t":133.78,"r":227.26,"b":133.8},{"p":1,"c":"s","l":227.6,"t":125.28,"r":234.52,"b":133.98},{"p":1,"c":"e","l":235.86,"t":125.28,"r":243.54,"b":133.98},{"p":1,"c":"g","l":244.66,"t":125.28,"r":252.01,"b":137.16},{"p":1,"c":"u","l":254.06,"t":125.45,"r":260.81,"b":133.98},{"p":1,"c":"i","l":262.97,"t":122.29,"r":264.39,"b":133.8},{"p":1,"c":"r","l":266.56,"t":125.28,"r":271.1,"b":133.8},{"p":1,"c":" ","l":270.8,"t":133.78,"r":275.27,"b":133.8},{"p":1,"c":"a","l":275.94,"t":125.28,"r":283.62,"b":133.98},{"p":1,"c":" ","l":284.0,"t":133.78,"r":288.47,"b":133.8},{"p":1,"c":"C","l":289.36,"t":122.09,"r":299.54,"b":133.98},{"p":1,"c":"r","l":301.12,"t":125.28,"r":305.65,"b":133.8},{"p":1,"c":"i","l":306.42,"t":122.29,"r":307.83,"b":133.8},{"p":1,"c":"s","l":309.46,"t":125.28,"r":316.38,"b":133.98},{"p":1,"c":"t","l":317.17,"t":122.54,"r":321.24,"b":133.9},{"p":1,"c":"o","l":321.97,"t":125.28,"r":329.78,"b":133.98},{"p":1,"c":" ","l":167.56,"t":148.43,"r":170.9,"b":148.44},{"p":1,"c":"B","l":224.96,"t":139.85,"r":232.3,"b":148.44},{"p":1,"c":"m","l":232.76,"t":142.08,"r":242.12,"b":148.44},{"p":1,"c":"7","l":243.89,"t":139.97,"r":249.58,"b":148.44},{"p":1,"c":" ","l":249.16,"t":148.43,"r":252.5,"b":148.44},{"p":1,"c":"A","l":315.65,"t":139.85,"r":323.28,"b":148.44},{"p":1,"c":" ","l":323.8,"t":148.43,"r":327.14,"b":148.44},{"p":1,"c":"G","l":361.68,"t":139.7,"r":369.71,"b":148.57},{"p":1,"c":" ","l":369.88,"t":148.43,"r":373.22,"b":148.44},{"p":1,"c":"\r","l":370.16,"t":148.44,"r":370.16,"b":148.44},{"p":1,"c":"\n","l":370.16,"t":148.44,"r":370.16,"b":148.44},{"p":1,"c":"N","l":139.26,"t":154.45,"r":148.33,"b":165.96},{"p":1,"c":"o","l":150.09,"t":157.44,"r":157.91,"b":166.14},{"p":1,"c":" ","l":158.44,"t":165.94,"r":162.91,"b":165.96},{"p":1,"c":"v","l":163.21,"t":157.61,"r":170.85,"b":165.96},{"p":1,"c":"u","l":172.19,"t":157.61,"r":178.94,"b":166.14},{"p":1,"c":"e","l":180.64,"t":157.44,"r":188.32,"b":166.14},{"p":1,"c":"l","l":189.95,"t":154.45,"r":191.37,"b":165.96},{"p":1,"c":"v","l":192.5,"t":157.61,"r":200.14,"b":165.96},{"p":1,"c":"o","l":200.98,"t":157.44,"r":208.8,"b":166.14},{"p":1,"c":" ","l":209.33,"t":165.94,"r":213.8,"b":165.96},{"p":1,"c":"a","l":214.47,"t":157.44,"r":222.15,"b":166.14},{"p":1,"c":"t","l":223.06,"t":154.7,"r":227.13,"b":166.06},{"p":1,"c":"r","l":228.37,"t":157.44,"r":232.91,"b":165.96},{"p":1,"c":"á","l":233.19,"t":154.38,"r":240.87,"b":166.14},{"p":1,"c":"s","l":241.75,"t":157.44,"r":248.66,"b":166.14},{"p":1,"c":",","l":250.73,"t":164.35,"r":252.44,"b":168.23},{"p":1,"c":" ","l":253.72,"t":165.94,"r":258.19,"b":165.96},{"p":1,"c":"n","l":259.34,"t":157.44,"r":266.11,"b":165.96},{"p":1,"c":"o","l":267.7,"t":157.44,"r":275.52,"b":166.14},{"p":1,"c":" ","l":276.06,"t":165.94,"r":280.53,"b":165.96},{"p":1,"c":"v","l":280.59,"t":157.61,"r":288.23,"b":165.96},{"p":1,"c":"u","l":289.57,"t":157.61,"r":296.32,"b":166.14},{"p":1,"c":"e","l":298.02,"t":157.44,"r":305.71,"b":166.14},{"p":1,"c":"l","l":307.35,"t":154.45,"r":308.76,"b":165.96},{"p":1,"c":"v","l":309.88,"t":157.61,"r":317.52,"b":165.96},{"p":1,"c":"o","l":318.37,"t":157.44,"r":326.18,"b":166.14},{"p":1,"c":" ","l":326.72,"t":165.94,"r":331.19,"b":165.96},{"p":1,"c":"a","l":331.86,"t":157.44,"r":339.55,"b":166.14},{"p":1,"c":"t","l":340.46,"t":154.7,"r":344.53,"b":166.06},{"p":1,"c":"r","l":345.78,"t":157.44,"r":350.31,"b":165.96},{"p":1,"c":"á","l":350.6,"t":154.38,"r":358.29,"b":166.14},{"p":1,"c":"s","l":359.17,"t":157.44,"r":366.08,"b":166.14},{"p":1,"c":"\r","l":359.17,"t":165.96,"r":359.17,"b":165.96},{"p":1,"c":"\n","l":359.17,"t":165.96,"r":359.17,"b":165.96},{"p":1,"c":" ","l":138.04,"t":199.07,"r":141.38,"b":199.08},{"p":1,"c":"D","l":235.53,"t":190.49,"r":243.54,"b":199.08},{"p":1,"c":" ","l":243.64,"t":199.07,"r":246.98,"b":199.08},{"p":1,"c":"\r","l":243.92,"t":199.08,"r":243.92,"b":199.08},{"p":1,"c":"\n","l":243.92,"t":199.08,"r":243.92,"b":199.08},{"p":1,"c":"C","l":28.1,"t":206.47,"r":36.91,"b":216.75},{"p":1,"c":"O","l":38.15,"t":206.45,"r":47.68,"b":216.75},{"p":1,"c":"R","l":49.38,"t":206.63,"r":58.15,"b":216.6},{"p":1,"c":"O","l":59.03,"t":206.45,"r":68.57,"b":216.75},{"p":1,"c":" ","l":59.14,"t":216.6,"r":59.14,"b":216.6},{"p":1,"c":"F","l":139.36,"t":205.09,"r":147.13,"b":216.6},{"p":1,"c":"u","l":148.91,"t":208.25,"r":155.66,"b":216.78},{"p":1,"c":"i","l":157.82,"t":205.09,"r":159.23,"b":216.6},{"p":1,"c":"m","l":161.42,"t":208.08,"r":172.72,"b":216.6},{"p":1,"c":"o","l":174.33,"t":208.08,"r":182.14,"b":216.78},{"p":1,"c":"s","l":183.17,"t":208.08,"r":190.08,"b":216.78},{"p":1,"c":" ","l":190.6,"t":216.58,"r":195.07,"b":216.6},{"p":1,"c":"r","l":196.21,"t":208.08,"r":200.74,"b":216.6},{"p":1,"c":"e","l":201.03,"t":208.08,"r":208.71,"b":216.78},{"p":1,"c":"s","l":209.81,"t":208.08,"r":216.72,"b":216.78},{"p":1,"c":"c","l":217.86,"t":208.08,"r":225.13,"b":216.78},{"p":1,"c":"a","l":225.98,"t":208.08,"r":233.67,"b":216.78},{"p":1,"c":"t","l":234.57,"t":205.34,"r":238.63,"b":216.7},{"p":1,"c":"a","l":239.42,"t":208.08,"r":247.11,"b":216.78},{"p":1,"c":"d","l":248.26,"t":205.09,"r":255.5,"b":216.78},{"p":1,"c":"o","l":257.12,"t":208.08,"r":264.94,"b":216.78},{"p":1,"c":"s","l":265.72,"t":208.08,"r":272.64,"b":216.78},{"p":1,"c":" ","l":273.39,"t":216.58,"r":277.86,"b":216.6},{"p":1,"c":"d","l":278.5,"t":205.09,"r":285.74,"b":216.78},{"p":1,"c":"e","l":287.42,"t":208.08,"r":295.11,"b":216.78},{"p":1,"c":"l","l":296.73,"t":205.09,"r":298.15,"b":216.6},{"p":1,"c":" ","l":299.06,"t":216.58,"r":303.53,"b":216.6},{"p":1,"c":"p","l":304.69,"t":208.08,"r":311.93,"b":219.78},{"p":1,"c":"e","l":313.1,"t":208.08,"r":320.78,"b":216.78},{"p":1,"c":"c","l":322.0,"t":208.08,"r":329.27,"b":216.78},{"p":1,"c":"a","l":330.12,"t":208.08,"r":337.81,"b":216.78},{"p":1,"c":"d","l":338.97,"t":205.09,"r":346.2,"b":216.78},{"p":1,"c":"o","l":347.82,"t":208.08,"r":355.64,"b":216.78},{"p":1,"c":" ","l":203.56,"t":231.23,"r":206.9,"b":231.24},{"p":1,"c":"G","l":234.96,"t":222.5,"r":242.99,"b":231.37},{"p":1,"c":" ","l":243.16,"t":231.23,"r":246.5,"b":231.24},{"p":1,"c":"\r","l":243.44,"t":231.24,"r":243.44,"b":231.24},{"p":1,"c":"\n","l":243.44,"t":231.24,"r":243.44,"b":231.24},{"p":1,"c":"F","l":139.36,"t":237.25,"r":147.13,"b":248.76},{"p":1,"c":"u","l":148.91,"t":240.41,"r":155.66,"b":248.94},{"p":1,"c":"i","l":157.82,"t":237.25,"r":159.23,"b":248.76},{"p":1,"c":"m","l":161.42,"t":240.24,"r":172.72,"b":248.76},{"p":1,"c":"o","l":174.33,"t":240.24,"r":182.14,"b":248.94},{"p":1,"c":"s","l":183.17,"t":240.24,"r":190.08,"b":248.94},{"p":1,"c":" ","l":190.6,"t":248.74,"r":195.07,"b":248.76},{"p":1,"c":"e","l":195.76,"t":240.24,"r":203.44,"b":248.94},{"p":1,"c":"s","l":204.29,"t":240.24,"r":211.21,"b":248.94},{"p":1,"c":"c","l":212.59,"t":240.24,"r":219.86,"b":248.94},{"p":1,"c":"o","l":220.66,"t":240.24,"r":228.47,"b":248.94},{"p":1,"c":"g","l":229.52,"t":240.24,"r":236.87,"b":252.12},{"p":1,"c":"i","l":238.94,"t":237.25,"r":240.35,"b":248.76},{"p":1,"c":"d","l":242.02,"t":237.25,"r":249.26,"b":248.94},{"p":1,"c":"o","l":250.88,"t":240.24,"r":258.7,"b":248.94},{"p":1,"c":"s","l":259.48,"t":240.24,"r":266.4,"b":248.94},{"p":1,"c":" ","l":267.15,"t":248.74,"r":271.62,"b":248.76},{"p":1,"c":"p","l":272.78,"t":240.24,"r":280.02,"b":251.94},{"p":1,"c":"o","l":281.12,"t":240.24,"r":288.94,"b":248.94},{"p":1,"c":"r","l":290.51,"t":240.24,"r":295.05,"b":248.76},{"p":1,"c":" ","l":294.74,"t":248.74,"r":299.21,"b":248.76},{"p":1,"c":"s","l":299.56,"t":240.24,"r":306.48,"b":248.94},{"p":1,"c":"u","l":308.26,"t":240.41,"r":315.01,"b":248.94},{"p":1,"c":" ","l":315.86,"t":248.74,"r":320.33,"b":248.76},{"p":1,"c":"a","l":321.01,"t":240.24,"r":328.69,"b":248.94},{"p":1,"c":"m","l":330.36,"t":240.24,"r":341.67,"b":248.76},{"p":1,"c":"o","l":343.28,"t":240.24,"r":351.09,"b":248.94},{"p":1,"c":"r","l":352.66,"t":240.24,"r":357.2,"b":248.76},{"p":1,"c":"\r","l":351.95,"t":248.76,"r":351.95,"b":248.76},{"p":1,"c":"\n","l":351.95,"t":248.76,"r":351.95,"b":248.76},{"p":1,"c":"A","l":170.69,"t":254.81,"r":178.32,"b":263.4},{"p":1,"c":"s","l":179.3,"t":257.04,"r":184.85,"b":263.53},{"p":1,"c":"u","l":185.6,"t":257.17,"r":191.54,"b":263.53},{"p":1,"c":"s","l":192.02,"t":257.04,"r":197.57,"b":263.53},{"p":1,"c":"4","l":198.1,"t":254.81,"r":204.06,"b":263.4},{"p":1,"c":" ","l":204.28,"t":263.39,"r":207.62,"b":263.4},{"p":1,"c":"B","l":258.32,"t":254.81,"r":265.66,"b":263.4},{"p":1,"c":"m","l":266.12,"t":257.04,"r":275.48,"b":263.4},{"p":1,"c":"7","l":277.25,"t":254.93,"r":282.94,"b":263.4},{"p":1,"c":" ","l":282.52,"t":263.39,"r":285.86,"b":263.4},{"p":1,"c":"G","l":326.88,"t":254.66,"r":334.91,"b":263.53},{"p":1,"c":"\r","l":326.5,"t":263.4,"r":326.5,"b":263.4},{"p":1,"c":"\n","l":326.5,"t":263.4,"r":326.5,"b":263.4},{"p":1,"c":"S","l":138.76,"t":269.21,"r":147.93,"b":281.1},{"p":1,"c":"e","l":149.43,"t":272.4,"r":157.12,"b":281.1},{"p":1,"c":"r","l":158.77,"t":272.4,"r":163.3,"b":280.92},{"p":1,"c":"v","l":163.22,"t":272.57,"r":170.86,"b":280.92},{"p":1,"c":"i","l":172.23,"t":269.41,"r":173.65,"b":280.92},{"p":1,"c":"r","l":175.81,"t":272.4,"r":180.35,"b":280.92},{"p":1,"c":"e","l":180.65,"t":272.4,"r":188.33,"b":281.1},{"p":1,"c":"m","l":190.0,"t":272.4,"r":201.3,"b":280.92},{"p":1,"c":"o","l":202.9,"t":272.4,"r":210.72,"b":281.1},{"p":1,"c":"s","l":211.52,"t":272.4,"r":218.43,"b":281.1},{"p":1,"c":" ","l":219.18,"t":280.9,"r":223.65,"b":280.92},{"p":1,"c":"a","l":224.32,"t":272.4,"r":232.01,"b":281.1},{"p":1,"c":"l","l":233.41,"t":269.41,"r":234.83,"b":280.92},{"p":1,"c":" ","l":235.98,"t":280.9,"r":240.45,"b":280.92},{"p":1,"c":"S","l":241.02,"t":269.21,"r":250.19,"b":281.1},{"p":1,"c":"e","l":251.69,"t":272.4,"r":259.38,"b":281.1},{"p":1,"c":"ñ","l":261.05,"t":269.54,"r":267.82,"b":280.92},{"p":1,"c":"o","l":269.4,"t":272.4,"r":277.22,"b":281.1},{"p":1,"c":"r","l":278.8,"t":272.4,"r":283.34,"b":280.92},{"p":1,"c":",","l":284.33,"t":279.31,"r":286.04,"b":283.19},{"p":1,"c":" ","l":287.56,"t":280.9,"r":292.03,"b":280.92},{"p":1,"c":"s","l":292.38,"t":272.4,"r":299.29,"b":281.1},{"p":1,"c":"e","l":300.64,"t":272.4,"r":308.32,"b":281.1},{"p":1,"c":"r","l":309.97,"t":272.4,"r":314.51,"b":280.92},{"p":1,"c":"v","l":314.42,"t":272.57,"r":322.06,"b":280.92},{"p":1,"c":"i","l":323.43,"t":269.41,"r":324.85,"b":280.92},{"p":1,"c":"r","l":327.01,"t":272.4,"r":331.55,"b":280.92},{"p":1,"c":"e","l":331.85,"t":272.4,"r":339.53,"b":281.1},{"p":1,"c":"m","l":340.96,"t":272.4,"r":352.26,"b":280.92},{"p":1,"c":"o","l":353.86,"t":272.4,"r":361.68,"b":281.1},{"p":1,"c":"s","l":362.72,"t":272.4,"r":369.63,"b":281.1},{"p":1,"c":" ","l":370.14,"t":280.9,"r":374.61,"b":280.92},{"p":1,"c":"a","l":375.28,"t":272.4,"r":382.97,"b":281.1},{"p":1,"c":"l","l":384.37,"t":269.41,"r":385.79,"b":280.92},{"p":1,"c":" ","l":386.94,"t":280.9,"r":391.41,"b":280.92},{"p":1,"c":"S","l":392.23,"t":269.21,"r":401.39,"b":281.1},{"p":1,"c":"e","l":402.9,"t":272.4,"r":410.58,"b":281.1},{"p":1,"c":"ñ","l":412.25,"t":269.54,"r":419.02,"b":280.92},{"p":1,"c":"o","l":420.6,"t":272.4,"r":428.42,"b":281.1},{"p":1,"c":"r","l":430.0,"t":272.4,"r":434.54,"b":280.92},{"p":1,"c":" ","l":31.72,"t":295.55,"r":35.06,"b":295.56},{"p":1,"c":"D","l":244.41,"t":286.97,"r":252.42,"b":295.56},{"p":1,"c":" ","l":252.52,"t":295.55,"r":255.86,"b":295.56},{"p":1,"c":"\r","l":252.8,"t":295.56,"r":252.8,"b":295.56},{"p":1,"c":"\n","l":252.8,"t":295.56,"r":252.8,"b":295.56},{"p":1,"c":"A","l":138.04,"t":301.81,"r":148.78,"b":313.32},{"p":1,"c":"u","l":149.87,"t":304.97,"r":156.62,"b":313.5},{"p":1,"c":"n","l":158.79,"t":304.8,"r":165.56,"b":313.32},{"p":1,"c":"q","l":167.17,"t":304.8,"r":174.39,"b":316.5},{"p":1,"c":"u","l":176.53,"t":304.97,"r":183.28,"b":313.5},{"p":1,"c":"e","l":184.98,"t":304.8,"r":192.66,"b":313.5},{"p":1,"c":" ","l":193.27,"t":313.3,"r":197.74,"b":313.32},{"p":1,"c":"s","l":198.33,"t":304.8,"r":205.24,"b":313.5},{"p":1,"c":"e","l":206.59,"t":304.8,"r":214.27,"b":313.5},{"p":1,"c":" ","l":214.64,"t":313.3,"r":219.11,"b":313.32},{"p":1,"c":"l","l":220.22,"t":301.81,"r":221.64,"b":313.32},{"p":1,"c":"e","l":223.39,"t":304.8,"r":231.07,"b":313.5},{"p":1,"c":"v","l":231.64,"t":304.97,"r":239.28,"b":313.32},{"p":1,"c":"a","l":240.18,"t":304.8,"r":247.86,"b":313.5},{"p":1,"c":"n","l":249.55,"t":304.8,"r":256.31,"b":313.32},{"p":1,"c":"t","l":257.66,"t":302.06,"r":261.73,"b":313.42},{"p":1,"c":"e","l":262.52,"t":304.8,"r":270.21,"b":313.5},{"p":1,"c":"n","l":271.88,"t":304.8,"r":278.65,"b":313.32},{"p":1,"c":" ","l":279.7,"t":313.3,"r":284.17,"b":313.32},{"p":1,"c":"e","l":284.86,"t":304.8,"r":292.54,"b":313.5},{"p":1,"c":"n","l":294.21,"t":304.8,"r":300.98,"b":313.32},{"p":1,"c":"e","l":302.63,"t":304.8,"r":310.31,"b":313.5},{"p":1,"c":"m","l":311.98,"t":304.8,"r":323.28,"b":313.32},{"p":1,"c":"i","l":325.18,"t":301.81,"r":326.59,"b":313.32},{"p":1,"c":"g","l":328.22,"t":304.8,"r":335.57,"b":316.68},{"p":1,"c":"o","l":337.13,"t":304.8,"r":344.94,"b":313.5},{"p":1,"c":"s","l":345.98,"t":304.8,"r":352.89,"b":313.5},{"p":1,"c":" ","l":239.56,"t":327.95,"r":242.9,"b":327.96},{"p":1,"c":"G","l":264.24,"t":319.22,"r":272.27,"b":328.09},{"p":1,"c":" ","l":272.44,"t":327.95,"r":275.78,"b":327.96},{"p":1,"c":"\r","l":272.72,"t":327.96,"r":272.72,"b":327.96},{"p":1,"c":"\n","l":272.72,"t":327.96,"r":272.72,"b":327.96},{"p":1,"c":"A","l":138.04,"t":333.97,"r":148.78,"b":345.48},{"p":1,"c":"u","l":149.87,"t":337.13,"r":156.62,"b":345.66},{"p":1,"c":"n","l":158.79,"t":336.96,"r":165.56,"b":345.48},{"p":1,"c":"q","l":167.17,"t":336.96,"r":174.39,"b":348.66},{"p":1,"c":"u","l":176.53,"t":337.13,"r":183.28,"b":345.66},{"p":1,"c":"e","l":184.98,"t":336.96,"r":192.66,"b":345.66},{"p":1,"c":" ","l":193.27,"t":345.46,"r":197.74,"b":345.48},{"p":1,"c":"v","l":198.04,"t":337.13,"r":205.68,"b":345.48},{"p":1,"c":"e","l":206.59,"t":336.96,"r":214.27,"b":345.66},{"p":1,"c":"n","l":215.94,"t":336.96,"r":222.71,"b":345.48},{"p":1,"c":"g","l":224.28,"t":336.96,"r":231.63,"b":348.84},{"p":1,"c":"a","l":233.23,"t":336.96,"r":240.91,"b":345.66},{"p":1,"c":" ","l":241.29,"t":345.46,"r":245.76,"b":345.48},{"p":1,"c":"p","l":246.91,"t":336.96,"r":254.15,"b":348.66},{"p":1,"c":"r","l":255.78,"t":336.96,"r":260.32,"b":345.48},{"p":1,"c":"u","l":261.05,"t":337.13,"r":267.81,"b":345.66},{"p":1,"c":"e","l":269.5,"t":336.96,"r":277.19,"b":345.66},{"p":1,"c":"b","l":278.84,"t":333.97,"r":286.08,"b":345.66},{"p":1,"c":"a","l":287.26,"t":336.96,"r":294.95,"b":345.66},{"p":1,"c":" ","l":295.57,"t":345.46,"r":300.04,"b":345.48},{"p":1,"c":"o","l":300.66,"t":336.96,"r":308.47,"b":345.66},{"p":1,"c":" ","l":309.01,"t":345.46,"r":313.48,"b":345.48},{"p":1,"c":"a","l":314.15,"t":336.96,"r":321.84,"b":345.66},{"p":1,"c":"f","l":322.6,"t":333.77,"r":327.49,"b":345.48},{"p":1,"c":"l","l":328.05,"t":333.97,"r":329.46,"b":345.48},{"p":1,"c":"i","l":331.43,"t":333.97,"r":332.85,"b":345.48},{"p":1,"c":"c","l":334.6,"t":336.96,"r":341.86,"b":345.66},{"p":1,"c":"c","l":342.52,"t":336.96,"r":349.78,"b":345.66},{"p":1,"c":"i","l":351.11,"t":333.97,"r":352.53,"b":345.48},{"p":1,"c":"ó","l":354.18,"t":333.9,"r":361.99,"b":345.66},{"p":1,"c":"n","l":363.59,"t":336.96,"r":370.36,"b":345.48},{"p":1,"c":"\r","l":363.09,"t":345.48,"r":363.09,"b":345.48},{"p":1,"c":"\n","l":363.09,"t":345.48,"r":363.09,"b":345.48},{"p":1,"c":"A","l":171.89,"t":351.53,"r":179.52,"b":360.12},{"p":1,"c":"s","l":180.5,"t":353.76,"r":186.05,"b":360.25},{"p":1,"c":"u","l":186.8,"t":353.89,"r":192.74,"b":360.25},{"p":1,"c":"s","l":193.22,"t":353.76,"r":198.77,"b":360.25},{"p":1,"c":"4","l":199.3,"t":351.53,"r":205.26,"b":360.12},{"p":1,"c":" ","l":205.48,"t":360.11,"r":208.82,"b":360.12},{"p":1,"c":"B","l":259.52,"t":351.53,"r":266.86,"b":360.12},{"p":1,"c":"m","l":267.32,"t":353.76,"r":276.68,"b":360.12},{"p":1,"c":"7","l":278.21,"t":351.65,"r":283.9,"b":360.12},{"p":1,"c":" ","l":283.48,"t":360.11,"r":286.82,"b":360.12},{"p":1,"c":"G","l":328.08,"t":351.38,"r":336.11,"b":360.25},{"p":1,"c":" ","l":419.56,"t":360.11,"r":422.9,"b":360.12},{"p":1,"c":"D","l":446.97,"t":351.53,"r":454.98,"b":360.12},{"p":1,"c":"\r","l":447.16,"t":360.12,"r":447.16,"b":360.12},{"p":1,"c":"\n","l":447.16,"t":360.12,"r":447.16,"b":360.12},{"p":1,"c":"S","l":138.76,"t":365.93,"r":147.93,"b":377.82},{"p":1,"c":"e","l":149.43,"t":369.12,"r":157.12,"b":377.82},{"p":1,"c":"r","l":158.77,"t":369.12,"r":163.3,"b":377.64},{"p":1,"c":"v","l":163.22,"t":369.29,"r":170.86,"b":377.64},{"p":1,"c":"i","l":172.23,"t":366.13,"r":173.65,"b":377.64},{"p":1,"c":"r","l":175.81,"t":369.12,"r":180.35,"b":377.64},{"p":1,"c":"e","l":180.65,"t":369.12,"r":188.33,"b":377.82},{"p":1,"c":"m","l":190.0,"t":369.12,"r":201.3,"b":377.64},{"p":1,"c":"o","l":202.9,"t":369.12,"r":210.72,"b":377.82},{"p":1,"c":"s","l":211.52,"t":369.12,"r":218.43,"b":377.82},{"p":1,"c":" ","l":219.18,"t":377.62,"r":223.65,"b":377.64},{"p":1,"c":"a","l":224.32,"t":369.12,"r":232.01,"b":377.82},{"p":1,"c":"l","l":233.41,"t":366.13,"r":234.83,"b":377.64},{"p":1,"c":" ","l":235.98,"t":377.62,"r":240.45,"b":377.64},{"p":1,"c":"S","l":241.02,"t":365.93,"r":250.19,"b":377.82},{"p":1,"c":"e","l":251.69,"t":369.12,"r":259.38,"b":377.82},{"p":1,"c":"ñ","l":261.05,"t":366.26,"r":267.82,"b":377.64},{"p":1,"c":"o","l":269.4,"t":369.12,"r":277.22,"b":377.82},{"p":1,"c":"r","l":278.8,"t":369.12,"r":283.34,"b":377.64},{"p":1,"c":",","l":284.33,"t":376.03,"r":286.04,"b":379.91},{"p":1,"c":" ","l":287.56,"t":377.62,"r":292.03,"b":377.64},{"p":1,"c":"s","l":292.38,"t":369.12,"r":299.29,"b":377.82},{"p":1,"c":"e","l":300.64,"t":369.12,"r":308.32,"b":377.82},{"p":1,"c":"r","l":309.97,"t":369.12,"r":314.51,"b":377.64},{"p":1,"c":"v","l":314.42,"t":369.29,"r":322.06,"b":377.64},{"p":1,"c":"i","l":323.43,"t":366.13,"r":324.85,"b":377.64},{"p":1,"c":"r","l":327.01,"t":369.12,"r":331.55,"b":377.64},{"p":1,"c":"e","l":331.85,"t":369.12,"r":339.53,"b":377.82},{"p":1,"c":"m","l":340.96,"t":369.12,"r":352.26,"b":377.64},{"p":1,"c":"o","l":353.86,"t":369.12,"r":361.68,"b":377.82},{"p":1,"c":"s","l":362.72,"t":369.12,"r":369.63,"b":377.82},{"p":1,"c":" ","l":370.14,"t":377.62,"r":374.61,"b":377.64},{"p":1,"c":"a","l":375.28,"t":369.12,"r":382.97,"b":377.82},{"p":1,"c":"l","l":384.37,"t":366.13,"r":385.79,"b":377.64},{"p":1,"c":" ","l":386.94,"t":377.62,"r":391.41,"b":377.64},{"p":1,"c":"S","l":392.23,"t":365.93,"r":401.39,"b":377.82},{"p":1,"c":"e","l":402.9,"t":369.12,"r":410.58,"b":377.82},{"p":1,"c":"ñ","l":412.25,"t":366.26,"r":419.02,"b":377.64},{"p":1,"c":"o","l":420.6,"t":369.12,"r":428.42,"b":377.82},{"p":1,"c":"r","l":430.0,"t":369.12,"r":434.54,"b":377.64},{"p":1,"c":"\r","l":429.29,"t":377.64,"r":429.29,"b":377.64},{"p":1,"c":"\n","l":429.29,"t":377.64,"r":429.29,"b":377.64},{"p":1,"c":" ","l":95.56,"t":410.74,"r":100.03,"b":410.76},{"p":1,"c":"G","l":137.04,"t":402.02,"r":145.07,"b":410.89},{"p":1,"c":" ","l":239.56,"t":410.75,"r":242.9,"b":410.76},{"p":1,"c":"\r","l":239.84,"t":410.76,"r":239.84,"b":410.76},{"p":1,"c":"\n","l":239.84,"t":410.76,"r":239.84,"b":410.76},{"p":1,"c":"T","l":32.04,"t":418.31,"r":39.95,"b":428.28},{"p":1,"c":"A","l":40.12,"t":418.31,"r":49.42,"b":428.28},{"p":1,"c":"G","l":50.22,"t":418.15,"r":59.43,"b":428.43},{"p":1,"c":" ","l":50.26,"t":428.28,"r":50.26,"b":428.28},{"p":1,"c":"N","l":139.26,"t":416.77,"r":148.33,"b":428.28},{"p":1,"c":"o","l":150.09,"t":419.76,"r":157.91,"b":428.46},{"p":1,"c":" ","l":158.44,"t":428.26,"r":162.91,"b":428.28},{"p":1,"c":"n","l":164.06,"t":419.76,"r":170.83,"b":428.28},{"p":1,"c":"o","l":172.41,"t":419.76,"r":180.23,"b":428.46},{"p":1,"c":"s","l":181.26,"t":419.76,"r":188.18,"b":428.46},{"p":1,"c":" ","l":188.92,"t":428.26,"r":193.39,"b":428.28},{"p":1,"c":"c","l":193.87,"t":419.76,"r":201.13,"b":428.46},{"p":1,"c":"a","l":201.98,"t":419.76,"r":209.66,"b":428.46},{"p":1,"c":"n","l":211.34,"t":419.76,"r":218.11,"b":428.28},{"p":1,"c":"s","l":219.66,"t":419.76,"r":226.58,"b":428.46},{"p":1,"c":"a","l":227.9,"t":419.76,"r":235.59,"b":428.46},{"p":1,"c":"r","l":237.25,"t":419.76,"r":241.78,"b":428.28},{"p":1,"c":"e","l":242.08,"t":419.76,"r":249.77,"b":428.46},{"p":1,"c":"m","l":251.19,"t":419.76,"r":262.49,"b":428.28},{"p":1,"c":"o","l":264.09,"t":419.76,"r":271.91,"b":428.46},{"p":1,"c":"s","l":272.94,"t":419.76,"r":279.86,"b":428.46},{"p":1,"c":"\r","l":272.94,"t":428.28,"r":272.94,"b":428.28},{"p":1,"c":"\n","l":272.94,"t":428.28,"r":272.94,"b":428.28},{"p":1,"c":"D","l":276.09,"t":434.33,"r":284.1,"b":442.92},{"p":1,"c":"\r","l":276.28,"t":442.92,"r":276.28,"b":442.92},{"p":1,"c":"\n","l":276.28,"t":442.92,"r":276.28,"b":442.92},{"p":1,"c":"S","l":138.76,"t":448.73,"r":147.93,"b":460.62},{"p":1,"c":"e","l":149.43,"t":451.92,"r":157.12,"b":460.62},{"p":1,"c":"ñ","l":158.79,"t":449.06,"r":165.56,"b":460.44},{"p":1,"c":"o","l":167.14,"t":451.92,"r":174.96,"b":460.62},{"p":1,"c":"r","l":176.54,"t":451.92,"r":181.08,"b":460.44},{"p":1,"c":" ","l":180.78,"t":460.42,"r":185.25,"b":460.44},{"p":1,"c":"t","l":185.63,"t":449.18,"r":189.7,"b":460.54},{"p":1,"c":"e","l":190.5,"t":451.92,"r":198.18,"b":460.62},{"p":1,"c":" ","l":198.55,"t":460.42,"r":203.02,"b":460.44},{"p":1,"c":"s","l":203.6,"t":451.92,"r":210.52,"b":460.62},{"p":1,"c":"e","l":211.86,"t":451.92,"r":219.55,"b":460.62},{"p":1,"c":"g","l":220.67,"t":451.92,"r":228.02,"b":463.8},{"p":1,"c":"u","l":230.07,"t":452.09,"r":236.82,"b":460.62},{"p":1,"c":"i","l":238.99,"t":448.93,"r":240.4,"b":460.44},{"p":1,"c":"r","l":242.57,"t":451.92,"r":247.1,"b":460.44},{"p":1,"c":"e","l":247.4,"t":451.92,"r":255.09,"b":460.62},{"p":1,"c":"m","l":256.75,"t":451.92,"r":268.06,"b":460.44},{"p":1,"c":"o","l":269.66,"t":451.92,"r":277.47,"b":460.62},{"p":1,"c":"s","l":278.27,"t":451.92,"r":285.18,"b":460.62},{"p":1,"c":"\r","l":278.27,"t":460.44,"r":278.27,"b":460.44},{"p":1,"c":"\n","l":278.27,"t":460.44,"r":278.27,"b":460.44},{"p":1,"c":"G","l":139.2,"t":466.34,"r":147.23,"b":475.21},{"p":1,"c":"\r","l":138.82,"t":475.08,"r":138.82,"b":475.08},{"p":1,"c":"\n","l":138.82,"t":475.08,"r":138.82,"b":475.08},{"p":1,"c":"N","l":139.26,"t":481.09,"r":148.33,"b":492.6},{"p":1,"c":"o","l":150.09,"t":484.08,"r":157.91,"b":492.78},{"p":1,"c":" ","l":158.44,"t":492.58,"r":162.91,"b":492.6},{"p":1,"c":"d","l":163.55,"t":481.09,"r":170.78,"b":492.78},{"p":1,"c":"e","l":172.48,"t":484.08,"r":180.16,"b":492.78},{"p":1,"c":"s","l":181.26,"t":484.08,"r":188.18,"b":492.78},{"p":1,"c":"m","l":189.98,"t":484.08,"r":201.29,"b":492.6},{"p":1,"c":"a","l":202.94,"t":484.08,"r":210.62,"b":492.78},{"p":1,"c":"y","l":211.26,"t":484.25,"r":218.89,"b":495.96},{"p":1,"c":"a","l":219.74,"t":484.08,"r":227.42,"b":492.78},{"p":1,"c":"r","l":229.08,"t":484.08,"r":233.62,"b":492.6},{"p":1,"c":"e","l":233.92,"t":484.08,"r":241.6,"b":492.78},{"p":1,"c":"m","l":243.26,"t":484.08,"r":254.57,"b":492.6},{"p":1,"c":"o","l":256.17,"t":484.08,"r":263.98,"b":492.78},{"p":1,"c":"s","l":264.78,"t":484.08,"r":271.69,"b":492.78},{"p":1,"c":"\r","l":264.78,"t":492.6,"r":264.78,"b":492.6},{"p":1,"c":"\n","l":264.78,"t":492.6,"r":264.78,"b":492.6},{"p":1,"c":"D","l":276.09,"t":498.65,"r":284.1,"b":507.24},{"p":1,"c":"\r","l":276.28,"t":507.24,"r":276.28,"b":507.24},{"p":1,"c":"\n","l":276.28,"t":507.24,"r":276.28,"b":507.24},{"p":1,"c":"S","l":138.76,"t":513.05,"r":147.93,"b":524.94},{"p":1,"c":"e","l":149.43,"t":516.24,"r":157.12,"b":524.94},{"p":1,"c":"ñ","l":158.78,"t":513.38,"r":165.55,"b":524.76},{"p":1,"c":"o","l":167.13,"t":516.24,"r":174.94,"b":524.94},{"p":1,"c":"r","l":176.52,"t":516.24,"r":181.06,"b":524.76},{"p":1,"c":" ","l":180.76,"t":524.74,"r":185.23,"b":524.76},{"p":1,"c":"t","l":185.6,"t":513.5,"r":189.67,"b":524.86},{"p":1,"c":"e","l":190.46,"t":516.24,"r":198.14,"b":524.94},{"p":1,"c":" ","l":198.5,"t":524.74,"r":202.97,"b":524.76},{"p":1,"c":"s","l":203.55,"t":516.24,"r":210.47,"b":524.94},{"p":1,"c":"e","l":211.81,"t":516.24,"r":219.49,"b":524.94},{"p":1,"c":"r","l":221.14,"t":516.24,"r":225.67,"b":524.76},{"p":1,"c":"v","l":225.34,"t":516.41,"r":232.97,"b":524.76},{"p":1,"c":"i","l":234.34,"t":513.25,"r":235.76,"b":524.76},{"p":1,"c":"r","l":237.93,"t":516.24,"r":242.47,"b":524.76},{"p":1,"c":"e","l":242.76,"t":516.24,"r":250.45,"b":524.94},{"p":1,"c":"m","l":252.11,"t":516.24,"r":263.41,"b":524.76},{"p":1,"c":"o","l":265.02,"t":516.24,"r":272.84,"b":524.94},{"p":1,"c":"s","l":273.63,"t":516.24,"r":280.54,"b":524.94}]}
+\ No newline at end of file
+diff --git a/test/pdf_chordpro/fixtures/serviremos_al_senor.cho b/test/pdf_chordpro/fixtures/serviremos_al_senor.cho
+deleted file mode 100644
+index ba8afde..0000000
+--- a/test/pdf_chordpro/fixtures/serviremos_al_senor.cho
++++ /dev/null
+@@ -1,56 +0,0 @@
+-{title: SERVIREMOS AL SEÑOR}
+-
+-{start_of_introduccion: INTRODUCCIÓN}
+-[D] | [G]
+-{end_of_introduccion}
+-
+-{start_of_verse: VERSO 1}
+-[D][G]Nos humillamos delante de nuestro Dios
+-[Bm][A][G]Sacrificio agradable queremos ser
+-[D][G]Hoy renunciamos a nuestra voluntad
+-[Bm][A][G]Su palabra es nuestra guía al caminar
+-{end_of_verse}
+-
+-{start_of_chorus: CORO}
+-[D]Fuimos rescatados del pecado
+-[G]Fuimos escogidos por su amor
+-[Asus4][Bm7][G]Serviremos al Señor, serviremos al Señor
+-[D]Aunque se levanten enemigos
+-[G]Aunque venga prueba o aflicción
+-[Asus4][Bm7][G][D][G]Serviremos al Señor, serviremos al Señor
+-{end_of_chorus}
+-
+-{start_of_verse: VERSO 2}
+-[D][G]En obediencia, temor y gratitud
+-[Bm][A][G]Nos rendimos ante aquel que nos llamó
+-[D][G]Pueblo adquirido a precio de sangre
+-[Bm][A][G]Para dar a conocer de su bondad
+-{end_of_verse}
+-
+-{start_of_instrumental: INSTRUMENTAL}
+-[A] | [Bm] | [G] | [G]
+-[A] | [Bm] | [C] | [C]
+-{end_of_instrumental}
+-
+-{start_of_medley: MEDLEY}
+-[D][G]He decidido seguir a Cristo
+-[Bm7][A]He decidido seguir a Cristo
+-[D][G]He decidido seguir a Cristo
+-[Bm7][A][G]No vuelvo atrás, no vuelvo atrás
+-{end_of_medley}
+-
+-{start_of_chorus: CORO}
+-[D]Fuimos rescatados del pecado
+-[G]Fuimos escogidos por su amor
+-[Asus4][Bm7][G]Serviremos al Señor, serviremos al Señor
+-[D]Aunque se levanten enemigos
+-[G]Aunque venga prueba o aflicción
+-[Asus4][Bm7][G][D]Serviremos al Señor, serviremos al Señor
+-{end_of_chorus}
+-
+-{start_of_final: TAG}
+-[G]No nos cansaremos
+-[D]Señor te seguiremos
+-[G]No desmayaremos
+-[D]Señor te serviremos
+-{end_of_final}
+diff --git a/test/pdf_chordpro/geometry_adaptive_test.dart b/test/pdf_chordpro/geometry_adaptive_test.dart
+new file mode 100644
+index 0000000..cb9e43a
+--- /dev/null
++++ b/test/pdf_chordpro/geometry_adaptive_test.dart
+@@ -0,0 +1,76 @@
++// Regresion: si las cajas de las palabras vienen "infladas" (muy altas), la
++// fila de acordes y la de letra se funden al agrupar. El importador debe
++// reintentar con tolerancias mas estrictas y conservar la X real de cada
++// acorde, en vez de caer al texto layout (que solo es aproximado).
++import 'package:appchords/services/pdf_chordpro/pdf_line_processor.dart';
++import 'package:appchords/services/pdf_chordpro/pdf_models.dart';
++import 'package:appchords/services/pdf_chordpro/pdf_to_chordpro_service.dart';
++import 'package:flutter_test/flutter_test.dart';
++
++/// Palabra con 6 pt por letra y la X de cada letra (como da Syncfusion).
++PdfWord _w(String text, double left, double top, {double h = 12, double fs = 11}) => PdfWord(
++      text: text,
++      left: left,
++      right: left + 6.0 * text.length,
++      top: top,
++      bottom: top + h,
++      fontSize: fs,
++      glyphLefts: [for (var i = 0; i < text.length; i++) left + 6.0 * i],
++      page: 0,
++    );
++
++/// Titulo + dos pares fila-de-acordes / fila-de-letra, a 14 pt de separacion.
++List<PdfWord> _song({required double h}) => [
++      _w('MI', 100, 40, h: h, fs: 16),
++      _w('CANCION', 118, 40, h: h, fs: 16),
++      // par 1: acorde D sobre la 5.a letra de "humillamos", G sobre la 2.a de "delante"
++      _w('D', 148, 100, h: h),
++      _w('G', 196, 100, h: h),
++      _w('Nos', 100, 114, h: h),
++      _w('humillamos', 124, 114, h: h),
++      _w('delante', 190, 114, h: h),
++      // par 2
++      _w('Bm', 106, 150, h: h),
++      _w('Sacrificio', 100, 164, h: h),
++      _w('agradable', 166, 164, h: h),
++    ];
++
++void main() {
++  const svc = PdfToChordProService();
++
++  test('con cajas altas, la tolerancia por defecto funde acordes y letra', () {
++    final lines = groupLines(_song(h: 40), 612);
++    // Sin el reintento esto es lo que pasaba: filas fundidas.
++    expect(lines.length < 5, isTrue);
++  });
++
++  test('una tolerancia mas estricta separa las filas', () {
++    final lines = groupLines(_song(h: 40), 612, tolerance: 0.15);
++    expect(lines.length, 5);
++  });
++
++  test('linesFromWordsReliable encuentra una tolerancia que separa las filas', () {
++    final r = svc.linesFromWordsReliable(_song(h: 40), 612);
++    expect(r, isNotNull);
++    expect(r!.lines.length, 5);
++    expect(r.tolerance < 0.5, isTrue);
++  });
++
++  test('con cajas normales basta la tolerancia por defecto', () {
++    final r = svc.linesFromWordsReliable(_song(h: 12), 612);
++    expect(r, isNotNull);
++    expect(r!.tolerance, lineGroupTolerance);
++  });
++
++  for (final h in [12.0, 40.0, 60.0]) {
++    test('el acorde queda sobre su letra real (altura de caja $h)', () {
++      final r = svc.linesFromWordsReliable(_song(h: h), 612)!;
++      final out = svc
++          .buildFromLines(r.lines, pageWidth: 612, tolerance: r.tolerance)
++          .chordPro;
++      expect(out, contains('Nos humi[D]llamos d[G]elante'));
++      expect(out, contains('S[Bm]acrificio agradable'));
++      expect(out.contains('[D][G]'), isFalse);
++    });
++  }
++}
+diff --git a/test/pdf_chordpro/pdfium_fixture_test.dart b/test/pdf_chordpro/pdfium_fixture_test.dart
+new file mode 100644
+index 0000000..7df59c3
+--- /dev/null
++++ b/test/pdf_chordpro/pdfium_fixture_test.dart
+@@ -0,0 +1,71 @@
++// Regresion con los datos REALES de "Serviremos al Señor": las cajas de cada
++// carácter tal como las entrega PDFium (fixtures/serviremos_al_senor.chars.json).
++// Cada acorde debe quedar sobre la sílaba donde está en el PDF; antes salían
++// todos juntos al principio de la línea (`[D][G]Nos humillamos...`).
++import 'dart:convert';
++import 'dart:io';
++
++import 'package:appchords/services/pdf_chordpro/char_boxes.dart';
++import 'package:appchords/services/pdf_chordpro/pdf_to_chordpro_service.dart';
++import 'package:flutter_test/flutter_test.dart';
++
++void main() {
++  late String out;
++
++  setUpAll(() {
++    final d = jsonDecode(
++      File('test/pdf_chordpro/fixtures/serviremos_al_senor.chars.json').readAsStringSync(),
++    ) as Map;
++    final chars = [
++      for (final c in d['chars'] as List)
++        PdfCharBox(
++          ch: c['c'] as String,
++          left: (c['l'] as num).toDouble(),
++          top: (c['t'] as num).toDouble(),
++          right: (c['r'] as num).toDouble(),
++          bottom: (c['b'] as num).toDouble(),
++          page: c['p'] as int,
++        ),
++    ];
++    final width = ((d['pages'] as List).first['width'] as num).toDouble();
++    final all = const PdfToChordProService().convertAllFromChars(
++      chars,
++      pageWidth: width,
++      fallbackTitle: 'serviremos',
++    );
++    out = all.map((c) => c.chordPro).join('\n');
++  });
++
++  test('titulo y secciones', () {
++    expect(out, contains('{title: SERVIREMOS AL SEÑOR}'));
++    expect(out, contains('{start_of_verse: VERSO 1}'));
++    expect(out, contains('{start_of_chorus: CORO}'));
++    expect(out, contains('{start_of_verse: VERSO 2}'));
++  });
++
++  test('los acordes ya no se juntan al principio de la linea', () {
++    expect(out.contains('[D][G]Nos'), isFalse);
++    expect(out.contains('[Bm][A][G]Sacrificio'), isFalse);
++  });
++
++  test('cada acorde queda sobre su silaba real del PDF', () {
++    expect(out, contains('Nos humil[D]lamos delante de nu[G]estro Dios'));
++    expect(out, contains('Sacri[Bm]ficio agrad[A]able queremos s[G]er'));
++    expect(out, contains('Hoy renun[D]ciamos a nuestra [G]voluntad'));
++    expect(out, contains('Fuimos resca[D]tados del pecado'));
++    expect(out, contains('Aunque venga pr[G]ueba o aflicción'));
++  });
++
++  test('la letra queda intacta (sin espacios dentro de las palabras)', () {
++    final lyrics = out.replaceAll(RegExp(r'\[[^\]]+\]'), '');
++    expect(lyrics, contains('Nos humillamos delante de nuestro Dios'));
++    expect(lyrics, contains('Sacrificio agradable queremos ser'));
++    expect(lyrics, contains('Serviremos al Señor, serviremos al Señor'));
++    expect(lyrics.contains('h u m'), isFalse);
++  });
++
++  test('las filas solo de acordes se conservan', () {
++    expect(out, contains('[D] | [G]'));
++    expect(out, contains('[A] | [Bm] | [G] | [G]'));
++  });
++}
+diff --git a/test/services/metadata/rate_limiter_test.dart b/test/services/metadata/rate_limiter_test.dart
+deleted file mode 100644
+index 0ec7be8..0000000
+--- a/test/services/metadata/rate_limiter_test.dart
++++ /dev/null
+@@ -1,37 +0,0 @@
+-import 'dart:async';
+-import 'package:flutter_test/flutter_test.dart';
+-
+-import '../../../lib/services/metadata/rate_limiter.dart';
+-
+-void main() {
+-  test('respeta el intervalo mínimo entre peticiones', () async {
+-    final limiter = RateLimiter(minInterval: const Duration(milliseconds: 200));
+-    var callCount = 0;
+-
+-    final start = DateTime.now();
+-    await limiter.run(() async {
+-      callCount++;
+-      return 'a';
+-    });
+-    await limiter.run(() async {
+-      callCount++;
+-      return 'b';
+-    });
+-    final elapsed = DateTime.now().difference(start);
+-
+-    expect(callCount, 2);
+-    // Dos llamadas con 200ms de intervalo → al menos 200ms transcurridos.
+-    expect(elapsed.inMilliseconds, greaterThanOrEqualTo(200));
+-  });
+-
+-  test('no espera si ya pasó el intervalo', () async {
+-    final limiter = RateLimiter(minInterval: const Duration(milliseconds: 50));
+-    await limiter.run(() async => 1);
+-    await Future.delayed(const Duration(milliseconds: 100));
+-    final start = DateTime.now();
+-    await limiter.run(() async => 2);
+-    final elapsed = DateTime.now().difference(start);
+-    // Ya pasó más de 50ms desde la última llamada, no debe esperar.
+-    expect(elapsed.inMilliseconds, lessThan(50));
+-  });
+-}
+diff --git a/test/services/metadata/song_metadata_service_test.dart b/test/services/metadata/song_metadata_service_test.dart
+deleted file mode 100644
+index f69665a..0000000
+--- a/test/services/metadata/song_metadata_service_test.dart
++++ /dev/null
+@@ -1,69 +0,0 @@
+-import 'package:flutter_test/flutter_test.dart';
+-import 'package:http/testing.dart';
+-
+-import '../../../lib/services/metadata/chord_key_detector.dart';
+-import '../../../lib/services/metadata/getsongbpm_client.dart';
+-import '../../../lib/services/metadata/musicbrainz_client.dart';
+-import '../../../lib/services/metadata/song_metadata_service.dart';
+-import '../../../lib/models/song_metadata_suggestion.dart';
+-
+-void main() {
+-  final detector = ChordKeyDetector();
+-
+-  test('detecta tono por acordes offline sin internet', () async {
+-    final getsongbpm = GetSongBpmClient(apiKey: '');
+-    final musicbrainz = MusicBrainzClient();
+-    final service = SongMetadataService(
+-      getsongbpm: getsongbpm,
+-      musicbrainz: musicbrainz,
+-    );
+-
+-    final sugerencia = await service.sugerir(
+-      titulo: 'Mi canción',
+-      chordProText: '[C] letra [G] letra [Am] letra [F] letra',
+-      existing: {'key': null, 'author': null, 'bpm': null, 'timeSignature': null},
+-      consultarOnline: false, // sin internet
+-    );
+-
+-    expect(sugerencia.key?.value, 'C');
+-    expect(sugerencia.key?.source, MetadataSource.chords);
+-  });
+-
+-  test('no sobrescribe campo ya llenado por el usuario', () async {
+-    final getsongbpm = GetSongBpmClient(apiKey: '');
+-    final musicbrainz = MusicBrainzClient();
+-    final service = SongMetadataService(
+-      getsongbpm: getsongbpm,
+-      musicbrainz: musicbrainz,
+-    );
+-
+-    final sugerencia = await service.sugerir(
+-      titulo: 'Mi canción',
+-      chordProText: '[C] letra [G] letra',
+-      existing: {
+-        'key': 'C', // ya llenado por el usuario
+-        'author': null,
+-        'bpm': null,
+-        'timeSignature': null,
+-      },
+-      consultarOnline: false,
+-    );
+-
+-    expect(sugerencia.key, isNull); // ya estaba lleno, no se sugiere
+-  });
+-
+-  test('caché negativa evita re-consultar título fallido', () {
+-    final getsongbpm = GetSongBpmClient(apiKey: '');
+-    final musicbrainz = MusicBrainzClient();
+-    final service = SongMetadataService(
+-      getsongbpm: getsongbpm,
+-      musicbrainz: musicbrainz,
+-    );
+-
+-    // Simular una consulta fallida para "Canción X"
+-    // Acceder al método privado a través de la instancia es difícil,
+-    // así que verificamos el comportamiento público: clearNegativeCache funciona.
+-    service.clearNegativeCache('Canción X');
+-    // No debería lanzar excepción.
+-  });
+-}
+diff --git a/test/services/metadata/tap_tempo_test.dart b/test/services/metadata/tap_tempo_test.dart
+deleted file mode 100644
+index 9b1ca19..0000000
+--- a/test/services/metadata/tap_tempo_test.dart
++++ /dev/null
+@@ -1,31 +0,0 @@
+-import 'package:flutter_test/flutter_test.dart';
+-
+-import '../../../lib/services/metadata/tap_tempo.dart';
+-
+-void main() {
+-  test('menos de 3 toques devuelve null', () {
+-    final tempo = TapTempo();
+-    tempo.tap();
+-    tempo.tap();
+-    expect(tempo.bpm, isNull);
+-    expect(tempo.tapCount, 2);
+-  });
+-
+-  test('reset limpia los toques', () {
+-    final tempo = TapTempo();
+-    tempo.tap();
+-    tempo.tap();
+-    tempo.tap();
+-    tempo.reset();
+-    expect(tempo.tapCount, 0);
+-    expect(tempo.bpm, isNull);
+-  });
+-
+-  test('tap incrementa el contador', () {
+-    final tempo = TapTempo();
+-    tempo.tap();
+-    tempo.tap();
+-    tempo.tap();
+-    expect(tempo.tapCount, 3);
+-  });
+-}

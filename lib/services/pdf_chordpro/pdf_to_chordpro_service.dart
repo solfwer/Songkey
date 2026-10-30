@@ -19,10 +19,12 @@ import 'package:syncfusion_flutter_pdf/pdf.dart';
 
 import '../../data/chord_parser.dart';
 import '../../data/chordpro.dart';
+import 'char_boxes.dart';
 import 'chord_mapper.dart';
 import 'layout_text_lines.dart';
 import 'line_classifier.dart';
-import 'pdf_line_processor.dart' show detectColumnSplit, flattenWords, groupLines;
+import 'pdf_line_processor.dart'
+    show detectColumnSplit, flattenWords, groupLines, lineGroupTolerance;
 import 'pdf_models.dart';
 
 /// Argumentos para el isolate de conversión (top-level porque Dart no
@@ -70,22 +72,32 @@ class PdfToChordProService {
   /// ningún título en el documento.
   PdfConversion convert(Uint8List bytes, {String? fallbackTitle}) {
     final doc = PdfDocument(inputBytes: bytes);
-    List<PdfLine> lines;
+    late final ({List<PdfLine> lines, double tolerance}) extracted;
     double pageWidth = 595;
     try {
       pageWidth = doc.pages.count > 0 ? doc.pages[0].size.width : 595;
-      lines = _extractLines(doc, pageWidth);
+      extracted = _extractLines(doc, pageWidth);
     } finally {
       doc.dispose();
     }
-    return buildFromLines(lines, fallbackTitle: fallbackTitle, pageWidth: pageWidth);
+    return buildFromLines(
+      extracted.lines,
+      fallbackTitle: fallbackTitle,
+      pageWidth: pageWidth,
+      tolerance: extracted.tolerance,
+    );
   }
 
   /// Convierte líneas ya extraídas (separado del PDF para poder probarlo).
+  ///
+  /// [tolerance] es la usada al agrupar las palabras en filas (ver
+  /// [linesFromWordsReliable]): hay que repetirla aquí porque las líneas se
+  /// reagrupan, y con otra tolerancia volverían a fundirse acordes y letra.
   PdfConversion buildFromLines(
     List<PdfLine> lines, {
     String? fallbackTitle,
     double pageWidth = 595,
+    double tolerance = lineGroupTolerance,
   }) {
     final warnings = <ImportWarning>[];
     bool hadExplicitHeader = false;
@@ -124,7 +136,7 @@ class PdfToChordProService {
 
     // Agrupar en líneas (ya separadas por columna si hay split)
     final working =
-        unpositioned ? lines : groupLines(allWords, splitX ?? pageWidth);
+        unpositioned ? lines : groupLines(allWords, splitX ?? pageWidth, tolerance: tolerance);
 
     // groupLines ya devuelve el orden de lectura: página -> columna (la
     // izquierda entera y luego la derecha) -> de arriba abajo. Ordenar otra vez
@@ -277,9 +289,17 @@ class PdfToChordProService {
   bool _isBelow(PdfLine below, PdfLine above) {
     if (below.page != above.page) return false;
     final gap = _holeBetween(below, above);
-    if (gap < -above.height * 0.5) return false;
-    return gap <= _tolerance(above);
+    if (gap >= -above.height * 0.5 && gap <= _tolerance(above)) return true;
+
+    // Respaldo por centros: si las cajas de las palabras vienen infladas (se
+    // solapan entre filas) los bordes no sirven, pero la distancia entre los
+    // centros de las filas sigue siendo la de un salto de línea normal.
+    final dy = _centerY(below) - _centerY(above);
+    final font = math.max(above.fontSize, 8.0);
+    return dy >= font * 0.6 && dy <= font * 3.0;
   }
+
+  double _centerY(PdfLine l) => (l.top + l.bottom) / 2;
 
   /// Hueco vertical entre el final de [above] y el principio de [below].
   double _holeBetween(PdfLine below, PdfLine above) => below.top - above.bottom;
@@ -349,18 +369,41 @@ class PdfToChordProService {
 
   /// Extrae las líneas del PDF.
   ///
-  /// Se intenta primero la vía geométrica (palabras con coordenadas). Si
-  /// Syncfusion devuelve acordes y letra fundidos en la misma fila —pasa en
-  /// "Serviremos al Señor"—, la geometría no sirve y se rehace con el texto en
-  /// modo layout, que sí respeta las filas que ve una persona.
-  List<PdfLine> _extractLines(PdfDocument doc, double pageWidth) {
-    final geometric = _linesFromGeometry(doc, pageWidth);
-    if (_geometryIsReliable(geometric)) return geometric;
+  /// Se intenta primero la vía geométrica (palabras con coordenadas reales: la
+  /// única que da la posición EXACTA de cada acorde sobre la letra). Si las
+  /// filas salen fundidas (acordes y letra en la misma línea), se vuelve a
+  /// agrupar con tolerancias más estrictas antes de rendirse. Solo si ninguna
+  /// funciona se usa el texto en modo layout, que es aproximado.
+  ({List<PdfLine> lines, double tolerance}) _extractLines(PdfDocument doc, double pageWidth) {
+    final words = _geometryWords(doc);
+    final geometric = linesFromWordsReliable(words, pageWidth);
+    if (geometric != null) return geometric;
     final laid = _linesFromLayout(doc);
-    return laid.isNotEmpty ? laid : geometric;
+    if (laid.isNotEmpty) return (lines: laid, tolerance: lineGroupTolerance);
+    return (
+      lines: _linesFromWords(words, pageWidth, lineGroupTolerance),
+      tolerance: lineGroupTolerance,
+    );
   }
 
+  /// Tolerancias de agrupación a probar, de la habitual a la más estricta
+  /// (fracción de la altura mediana de las palabras).
+  static const List<double> _toleranceSteps = [lineGroupTolerance, 0.35, 0.25, 0.15, 0.08];
 
+  /// Agrupa [words] en líneas probando tolerancias cada vez más estrictas hasta
+  /// que el resultado sea fiable. Devuelve las líneas y la tolerancia que
+  /// funcionó, o null si ninguna lo es.
+  @visibleForTesting
+  ({List<PdfLine> lines, double tolerance})? linesFromWordsReliable(
+    List<PdfWord> words,
+    double pageWidth,
+  ) {
+    for (final t in _toleranceSteps) {
+      final lines = _linesFromWords(words, pageWidth, t);
+      if (_geometryIsReliable(lines)) return (lines: lines, tolerance: t);
+    }
+    return null;
+  }
 
   /// Fracción de líneas que mezclan acordes con letra a partir de la cual la
   /// extracción por coordenadas no es fiable.
@@ -404,48 +447,53 @@ class PdfToChordProService {
 
 
 
-  /// Extrae palabras del PDF con posición, filtra números de página y marcas.
-  List<PdfLine> _linesFromGeometry(PdfDocument doc, double pageWidth) {
-    final textLines = PdfTextExtractor(doc).extractTextLines();
-    final allWords = <({PdfWord word, int page})>[];
-    for (final l in textLines) {
+  /// Palabras del PDF con su posición real (y la X de cada letra).
+  List<PdfWord> _geometryWords(PdfDocument doc) {
+    final out = <PdfWord>[];
+    for (final l in PdfTextExtractor(doc).extractTextLines()) {
       for (final w in l.wordCollection) {
         var wt = w.text;
         if (wt.isEmpty) {
           wt = w.glyphs.map((g) => g.text).join();
         }
         if (wt.trim().isEmpty) continue;
-        allWords.add((
-          word: PdfWord(
-            text: wt,
-            left: w.bounds.left,
-            top: w.bounds.top,
-            right: w.bounds.right,
-            bottom: w.bounds.bottom,
-            fontSize: l.fontSize,
-            glyphLefts: w.glyphs.map((g) => g.bounds.left).toList(),
-            page: l.pageIndex,
-          ),
+
+        var left = w.bounds.left, right = w.bounds.right;
+        var top = w.bounds.top, bottom = w.bounds.bottom;
+        // Bounds corruptos (ancho/alto negativo): se rehacen con los de las letras.
+        if ((right < left || bottom <= top) && w.glyphs.isNotEmpty) {
+          left = w.glyphs.map((g) => g.bounds.left).reduce(math.min);
+          right = w.glyphs.map((g) => g.bounds.right).reduce(math.max);
+          top = w.glyphs.map((g) => g.bounds.top).reduce(math.min);
+          bottom = w.glyphs.map((g) => g.bounds.bottom).reduce(math.max);
+        }
+        out.add(PdfWord(
+          text: wt,
+          left: left,
+          top: top,
+          right: right,
+          bottom: bottom,
+          fontSize: l.fontSize,
+          glyphLefts: w.glyphs.map((g) => g.bounds.left).toList(),
           page: l.pageIndex,
         ));
       }
     }
+    return out;
+  }
 
+  /// Agrupa palabras con coordenadas en líneas (columnas -> filas), con la
+  /// [tolerance] dada, y filtra números de página y marcas.
+  List<PdfLine> _linesFromWords(List<PdfWord> input, double pageWidth, double tolerance) {
     // Orden bruto: de arriba abajo, luego izquierda a derecha.
-    allWords.sort((a, b) {
-      final t = a.word.top.compareTo(b.word.top);
-      if (t != 0) return t;
-      return a.word.left.compareTo(b.word.left);
-    });
+    final words = [...input]..sort((a, b) {
+        final t = a.top.compareTo(b.top);
+        return t != 0 ? t : a.left.compareTo(b.left);
+      });
 
-    // Aplanar palabras
-    final words = allWords.map((w) => w.word).toList();
-
-    // Detectar corte de columnas
+    // Detectar corte de columnas y agrupar en líneas.
     final splitX = detectColumnSplit(words, pageWidth);
-
-    // Agrupar en líneas (ya separadas por columna si hay split)
-    final lines = groupLines(words, splitX ?? pageWidth);
+    final lines = groupLines(words, splitX ?? pageWidth, tolerance: tolerance);
 
     // Filtrar ruido
     final result = <PdfLine>[];
@@ -480,21 +528,72 @@ class PdfToChordProService {
       compute(_convertAllPdfIsolate, _PdfConvertArgs(bytes, fallbackTitle));
 
   // ============================================================================
+  // Desde cajas de caracteres (PDFium).
+  // ============================================================================
+
+  /// Palabras -> líneas, probando tolerancias hasta que sean fiables. Si
+  /// ninguna lo es, se usa la habitual (mejor eso que nada).
+  ({List<PdfLine> lines, double tolerance}) _linesFromCharWords(List<PdfWord> words, double pageWidth) {
+    final reliable = linesFromWordsReliable(words, pageWidth);
+    if (reliable != null) return reliable;
+    return (
+      lines: _linesFromWords(words, pageWidth, lineGroupTolerance),
+      tolerance: lineGroupTolerance,
+    );
+  }
+
+  /// Convierte un PDF a partir de la caja de cada carácter (ver [PdfCharBox]),
+  /// que da la posición REAL de cada acorde sobre la letra.
+  PdfConversion convertFromChars(
+    List<PdfCharBox> chars, {
+    required double pageWidth,
+    String? fallbackTitle,
+  }) {
+    final r = _linesFromCharWords(wordsFromChars(chars), pageWidth);
+    return buildFromLines(
+      r.lines,
+      fallbackTitle: fallbackTitle,
+      pageWidth: pageWidth,
+      tolerance: r.tolerance,
+    );
+  }
+
+  /// Como [convertFromChars] pero una conversión por canción detectada.
+  List<PdfConversion> convertAllFromChars(
+    List<PdfCharBox> chars, {
+    required double pageWidth,
+    String? fallbackTitle,
+  }) {
+    final r = _linesFromCharWords(wordsFromChars(chars), pageWidth);
+    return buildAllFromLines(
+      r.lines,
+      fallbackTitle: fallbackTitle,
+      pageWidth: pageWidth,
+      tolerance: r.tolerance,
+    );
+  }
+
+  // ============================================================================
   // Varias canciones en un mismo PDF.
   // ============================================================================
 
   /// Como [convert] pero devuelve una conversión por canción detectada en el PDF.
   List<PdfConversion> convertAll(Uint8List bytes, {String? fallbackTitle}) {
     final doc = PdfDocument(inputBytes: bytes);
-    List<PdfLine> lines;
+    late final ({List<PdfLine> lines, double tolerance}) extracted;
     double pageWidth = 595;
     try {
       pageWidth = doc.pages.count > 0 ? doc.pages[0].size.width : 595;
-      lines = _extractLines(doc, pageWidth);
+      extracted = _extractLines(doc, pageWidth);
     } finally {
       doc.dispose();
     }
-    return buildAllFromLines(lines, fallbackTitle: fallbackTitle, pageWidth: pageWidth);
+    return buildAllFromLines(
+      extracted.lines,
+      fallbackTitle: fallbackTitle,
+      pageWidth: pageWidth,
+      tolerance: extracted.tolerance,
+    );
   }
 
   /// Como [buildFromLines] pero devuelve una conversión por canción detectada.
@@ -502,14 +601,15 @@ class PdfToChordProService {
     List<PdfLine> lines, {
     String? fallbackTitle,
     double pageWidth = 595,
+    double tolerance = lineGroupTolerance,
   }) {
     if (lines.isEmpty) {
-      return [buildFromLines(lines, fallbackTitle: fallbackTitle, pageWidth: pageWidth)];
+      return [buildFromLines(lines, fallbackTitle: fallbackTitle, pageWidth: pageWidth, tolerance: tolerance)];
     }
 
     final boundaries = _detectSongBoundaries(lines);
     if (boundaries.length <= 1) {
-      return [buildFromLines(lines, fallbackTitle: fallbackTitle, pageWidth: pageWidth)];
+      return [buildFromLines(lines, fallbackTitle: fallbackTitle, pageWidth: pageWidth, tolerance: tolerance)];
     }
 
     final conversions = <PdfConversion>[];
@@ -522,6 +622,7 @@ class PdfToChordProService {
         group,
         fallbackTitle: i == 0 ? fallbackTitle : null,
         pageWidth: pageWidth,
+        tolerance: tolerance,
       );
       conversions.add(conv);
     }

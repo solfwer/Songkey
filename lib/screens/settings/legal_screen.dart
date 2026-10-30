@@ -45,13 +45,10 @@ extension LegalTopicInfo on LegalTopic {
                 'abierto. El componente de generación de PDF (Syncfusion '
                 'Flutter PDF) se utiliza bajo los términos de su propio '
                 'acuerdo de licencia.',
-            'Datos de tempo y tono',
-            'La función de autocompletar de metadatos puede consultar el '
-                'servicio gratuito GetSongBPM (https://getsongbpm.com) para '
-                'obtener sugerencias de tono, BPM y autor. GetSongBPM es un '
-                'servicio independiente; Songkey no está afiliado con él. '
-                'Todas las consultas son opcionales y se pueden deshabilitar '
-                'si no se dispone de clave de API.',
+            'Detección de tono',
+            'La tonalidad sugerida se calcula en tu dispositivo a partir de '
+                'los acordes de la canción. Es solo una sugerencia y puedes '
+                'cambiarla en cualquier momento.',
             'Responsabilidad',
             'La aplicación se ofrece "tal cual", sin garantías de ningún '
                 'tipo. No nos hacemos responsables del uso que se dé al '

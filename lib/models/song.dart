@@ -33,7 +33,7 @@ class Song {
   String? timeSignature;
 
   /// Por cada campo de metadatos, de dónde viene su valor:
-  /// 'acordes' (detectado offline), 'api' (GetSongBPM/MusicBrainz), 'tap' (tap tempo), 'manual'.
+  /// 'acordes' (detectado offline), 'api' (histórico, ya no se usa), 'tap' (tap tempo), 'manual'.
   /// Claves: 'author', 'key', 'bpm', 'timeSignature'.
   Map<String, String>? metadataSource;
 

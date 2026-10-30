@@ -179,11 +179,11 @@ Future<void> shareLibrary(BuildContext context, Store store) async {
   final origin = shareOrigin(context);
   try {
     final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/Songkey_biblioteca.songkey');
+    final file = File('${dir.path}/Songkey_biblioteca.sk');
     await file.writeAsString(encodeLibrary(store.state));
     await SharePlus.instance.share(
       ShareParams(
-        files: [XFile(file.path, mimeType: 'application/octet-stream', name: 'Songkey_biblioteca.songkey')],
+        files: [XFile(file.path, mimeType: 'application/octet-stream', name: 'Songkey_biblioteca.sk')],
         text: 'Mi biblioteca de Songkey (canciones y grupos)',
         sharePositionOrigin: origin,
       ),
